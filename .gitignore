@@ -4,6 +4,7 @@
 # Logs/Temp
 **/*.log
 **/*.tmp
+config/*.json
 
 # OS
 .DS_Store
