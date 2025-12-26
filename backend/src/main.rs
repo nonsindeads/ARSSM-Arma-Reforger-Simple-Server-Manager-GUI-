@@ -72,6 +72,18 @@ async fn main() {
         .route("/profiles", get(profiles_page).post(create_profile))
         .route("/profiles/:profile_id", get(profile_detail))
         .route(
+            "/profiles/:profile_id/workshop",
+            get(profile_workshop_page),
+        )
+        .route(
+            "/profiles/:profile_id/workshop/resolve",
+            axum::routing::post(profile_workshop_resolve),
+        )
+        .route(
+            "/profiles/:profile_id/workshop/save",
+            axum::routing::post(profile_workshop_save),
+        )
+        .route(
             "/profiles/:profile_id/config-preview",
             get(config_preview_page),
         )
@@ -81,6 +93,7 @@ async fn main() {
         )
         .route("/run-logs", get(run_logs_page))
         .route("/settings", get(settings_page).post(settings_save))
+        .route("/workshop", get(workshop_list_page))
         .route("/health", get(health))
         .route_service("/", ServeFile::new(index_file))
         .nest_service("/web", ServeDir::new(web_dir))
@@ -218,6 +231,94 @@ async fn profile_detail(
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
     Ok(Html(render_profile_detail(&profile)))
+}
+
+async fn workshop_list_page() -> Result<Html<String>, (StatusCode, String)> {
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_workshop_list(&profiles)))
+}
+
+async fn profile_workshop_page(
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    Ok(Html(render_workshop_page(&profile, None, None)))
+}
+
+async fn profile_workshop_resolve(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    if profile.workshop_url.trim().is_empty() {
+        return Ok(Html(render_workshop_page(
+            &profile,
+            None,
+            Some("Workshop URL is missing."),
+        )));
+    }
+
+    let result = state
+        .workshop_resolver
+        .resolve(&profile.workshop_url, 5)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
+    profile.root_mod_id = Some(result.root_id.clone());
+    profile.dependency_mod_ids = result.dependency_ids.clone();
+    profile.last_resolved_at = Some(now_timestamp());
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_workshop_page(
+        &profile,
+        Some(&result),
+        None,
+    )))
+}
+
+#[derive(Deserialize)]
+struct WorkshopSaveForm {
+    selected_scenario_id_path: String,
+    optional_mod_ids: String,
+}
+
+async fn profile_workshop_save(
+    Path(profile_id): Path<String>,
+    Form(form): Form<WorkshopSaveForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let scenario = form.selected_scenario_id_path.trim().to_string();
+    if scenario.is_empty() {
+        return Ok(Html(render_workshop_page(
+            &profile,
+            None,
+            Some("Scenario selection is required."),
+        )));
+    }
+
+    profile.selected_scenario_id_path = Some(scenario);
+    profile.optional_mod_ids = parse_mod_ids(&form.optional_mod_ids);
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_workshop_page(
+        &profile,
+        None,
+        Some("Workshop selections saved."),
+    )))
 }
 
 async fn config_preview_page(
@@ -473,6 +574,7 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
           <dt class="col-sm-3">Selected scenario</dt>
           <dd class="col-sm-9">{scenario}</dd>
         </dl>
+        <a class="btn btn-outline-primary me-2" href="/profiles/{id}/workshop">Workshop resolve</a>
         <a class="btn btn-primary me-2" href="/profiles/{id}/config-preview">Config preview</a>
         <a class="btn btn-outline-secondary" href="/profiles">Back to profiles</a>"#,
         name = html_escape::encode_text(&profile.display_name),
@@ -487,6 +589,159 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
     );
 
     render_layout("ARSSM Profile", "profiles", &content)
+}
+
+fn render_workshop_list(profiles: &[ServerProfile]) -> String {
+    let mut rows = String::new();
+    for profile in profiles {
+        rows.push_str(&format!(
+            r#"<tr>
+              <td><a href="/profiles/{id}/workshop">{name}</a></td>
+              <td>{url}</td>
+            </tr>"#,
+            id = html_escape::encode_text(&profile.profile_id),
+            name = html_escape::encode_text(&profile.display_name),
+            url = html_escape::encode_text(&profile.workshop_url),
+        ));
+    }
+
+    if rows.is_empty() {
+        rows.push_str("<tr><td colspan=\"2\">No profiles available.</td></tr>");
+    }
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Workshop Resolve</h1>
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Profile</th>
+              <th>Workshop URL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows}
+          </tbody>
+        </table>"#,
+        rows = rows,
+    );
+
+    render_layout("ARSSM Workshop", "workshop", &content)
+}
+
+fn render_workshop_page(
+    profile: &ServerProfile,
+    resolved: Option<&backend::workshop::WorkshopResolveResult>,
+    message: Option<&str>,
+) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+
+    let (scenarios, dependency_ids, errors) = if let Some(result) = resolved {
+        (result.scenarios.clone(), result.dependency_ids.clone(), result.errors.clone())
+    } else {
+        (Vec::new(), profile.dependency_mod_ids.clone(), Vec::new())
+    };
+
+    let mut scenario_options = String::new();
+    if scenarios.is_empty() {
+        scenario_options.push_str("<option value=\"\">No scenarios found</option>");
+    } else {
+        for scenario in scenarios.iter() {
+            let selected = if profile
+                .selected_scenario_id_path
+                .as_deref()
+                .map(|value| value == scenario)
+                .unwrap_or(false)
+            {
+                "selected"
+            } else {
+                ""
+            };
+            scenario_options.push_str(&format!(
+                r#"<option value="{value}" {selected}>{value}</option>"#,
+                value = html_escape::encode_text(scenario),
+                selected = selected,
+            ));
+        }
+    }
+
+    let optional_mods = if profile.optional_mod_ids.is_empty() {
+        String::new()
+    } else {
+        profile.optional_mod_ids.join("\n")
+    };
+
+    let dependency_count = dependency_ids.len();
+    let mut dependency_list = String::new();
+    for id in dependency_ids {
+        dependency_list.push_str(&format!("<li>{}</li>", html_escape::encode_text(&id)));
+    }
+    if dependency_list.is_empty() {
+        dependency_list.push_str("<li>No dependencies resolved.</li>");
+    }
+
+    let mut error_list = String::new();
+    for err in errors {
+        error_list.push_str(&format!("<li>{}</li>", html_escape::encode_text(&err)));
+    }
+    if error_list.is_empty() {
+        error_list.push_str("<li>No errors.</li>");
+    }
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Workshop Resolve</h1>
+        {notice}
+        <div class="card card-body mb-4">
+          <p class="mb-1"><strong>Profile:</strong> {name}</p>
+          <p class="mb-3"><strong>Workshop URL:</strong> {url}</p>
+          <form method="post" action="/profiles/{id}/workshop/resolve">
+            <button class="btn btn-primary" type="submit">Resolve</button>
+          </form>
+        </div>
+
+        <div class="card card-body mb-4">
+          <h2 class="h5">Scenario Selection</h2>
+          <form method="post" action="/profiles/{id}/workshop/save">
+            <div class="mb-3">
+              <label class="form-label" for="scenario">Scenario</label>
+              <select class="form-select" id="scenario" name="selected_scenario_id_path">
+                {scenario_options}
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="optional_mod_ids">Optional mods (one ID per line)</label>
+              <textarea class="form-control" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
+            </div>
+            <button class="btn btn-success" type="submit">Save selection</button>
+          </form>
+        </div>
+
+        <div class="card card-body mb-4">
+          <h2 class="h5">Dependencies</h2>
+          <p class="text-muted">{dependency_count} dependencies resolved.</p>
+          <details>
+            <summary>Show dependency list</summary>
+            <ul>{dependency_list}</ul>
+          </details>
+        </div>
+
+        <div class="card card-body">
+          <h2 class="h5">Resolve Errors</h2>
+          <ul>{error_list}</ul>
+        </div>"#,
+        notice = notice,
+        name = html_escape::encode_text(&profile.display_name),
+        url = html_escape::encode_text(&profile.workshop_url),
+        id = html_escape::encode_text(&profile.profile_id),
+        scenario_options = scenario_options,
+        optional_mods = html_escape::encode_text(&optional_mods),
+        dependency_count = dependency_count,
+        dependency_list = dependency_list,
+        error_list = error_list,
+    );
+
+    render_layout("ARSSM Workshop Resolve", "workshop", &content)
 }
 
 fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option<&str>) -> String {
@@ -672,6 +927,24 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+}
+
+fn parse_mod_ids(input: &str) -> Vec<String> {
+    input
+        .lines()
+        .flat_map(|line| line.split(','))
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect()
+}
+
+fn now_timestamp() -> String {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    seconds.to_string()
 }
 
 #[derive(Deserialize)]
