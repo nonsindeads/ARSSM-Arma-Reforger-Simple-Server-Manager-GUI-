@@ -91,6 +91,10 @@ async fn main() {
             "/profiles/:profile_id/config-write",
             axum::routing::post(write_config),
         )
+        .route(
+            "/profiles/:profile_id/config-regenerate",
+            axum::routing::post(regenerate_config),
+        )
         .route("/run-logs", get(run_logs_page))
         .route("/settings", get(settings_page).post(settings_save))
         .route("/workshop", get(workshop_list_page))
@@ -338,11 +342,20 @@ async fn config_preview_page(
 }
 
 async fn write_config(
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let mut profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let resolve_result = resolve_and_update_profile(&state, &mut profile)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
+    if let Err(message) = validate_selected_scenario(&profile, &resolve_result.scenarios) {
+        return Err((StatusCode::BAD_REQUEST, message));
+    }
 
     let config = generate_config_for_profile(&profile)
         .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
@@ -364,11 +377,47 @@ async fn write_config(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
+    let notice = if resolve_result.errors.is_empty() {
+        "Config written successfully."
+    } else {
+        "Config written with resolve warnings."
+    };
+
     Ok(Html(render_config_preview(
         &profile,
         &config_json,
-        Some("Config written successfully."),
+        Some(notice),
     )))
+}
+
+async fn regenerate_config(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let resolve_result = resolve_and_update_profile(&state, &mut profile)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
+    let notice = if let Err(message) = validate_selected_scenario(&profile, &resolve_result.scenarios) {
+        let preview = message;
+        return Ok(Html(render_config_preview(&profile, &preview, Some("Scenario selection invalid."))));
+    } else if resolve_result.errors.is_empty() {
+        Some("Config regenerated.")
+    } else {
+        Some("Config regenerated with resolve warnings.")
+    };
+
+    let preview = match generate_config_for_profile(&profile) {
+        Ok(value) => serde_json::to_string_pretty(&value)
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
+        Err(err) => err,
+    };
+
+    Ok(Html(render_config_preview(&profile, &preview, notice)))
 }
 
 async fn settings_page(
@@ -753,10 +802,14 @@ fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option
         <p class="text-muted">Profile: {name}</p>
         {notice}
         <pre class="bg-light p-3 border">{preview}</pre>
-        <form method="post" action="/profiles/{id}/config-write">
-          <button class="btn btn-primary" type="submit">Write file</button>
-          <a class="btn btn-outline-secondary ms-2" href="/profiles/{id}/config-preview">Regenerate</a>
-        </form>
+        <div class="d-flex gap-2">
+          <form method="post" action="/profiles/{id}/config-write">
+            <button class="btn btn-primary" type="submit">Write file</button>
+          </form>
+          <form method="post" action="/profiles/{id}/config-regenerate">
+            <button class="btn btn-outline-secondary" type="submit">Regenerate</button>
+          </form>
+        </div>
         <div class="mt-3">
           <a class="btn btn-outline-secondary" href="/profiles/{id}">Back to profile</a>
         </div>"#,
@@ -927,6 +980,36 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+}
+
+fn validate_selected_scenario(profile: &ServerProfile, scenarios: &[String]) -> Result<(), String> {
+    let selected = profile
+        .selected_scenario_id_path
+        .as_deref()
+        .ok_or_else(|| "selected_scenario_id_path not set".to_string())?;
+    if scenarios.is_empty() {
+        return Err("no scenarios resolved; resolve workshop first".to_string());
+    }
+    if !scenarios.iter().any(|value| value == selected) {
+        return Err("selected scenario no longer available".to_string());
+    }
+    Ok(())
+}
+
+async fn resolve_and_update_profile(
+    state: &AppState,
+    profile: &mut ServerProfile,
+) -> Result<backend::workshop::WorkshopResolveResult, String> {
+    if profile.workshop_url.trim().is_empty() {
+        return Err("workshop_url is missing".to_string());
+    }
+
+    let result = state.workshop_resolver.resolve(&profile.workshop_url, 5).await?;
+    profile.root_mod_id = Some(result.root_id.clone());
+    profile.dependency_mod_ids = result.dependency_ids.clone();
+    profile.last_resolved_at = Some(now_timestamp());
+    save_profile(profile).await?;
+    Ok(result)
 }
 
 fn parse_mod_ids(input: &str) -> Vec<String> {
