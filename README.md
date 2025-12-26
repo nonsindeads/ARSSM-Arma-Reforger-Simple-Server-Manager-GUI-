@@ -21,3 +21,6 @@ Request:
   "max_depth": 5
 }
 ```
+
+`GET /health` returns plain `ok` for non-browser clients and provides a small HTML test UI
+when accessed via a browser (Accept: `text/html`).

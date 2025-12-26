@@ -1,12 +1,18 @@
-use axum::{Json, Router, routing::get, extract::State, http::StatusCode};
+use axum::{
+    Json, Router, extract::State, http::{HeaderMap, StatusCode}, response::{Html, IntoResponse}, routing::get
+};
 use backend::workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use std::{io, path::PathBuf};
 use tower_http::services::{ServeDir, ServeFile};
 
-async fn health() -> &'static str {
-    "ok"
+async fn health(headers: HeaderMap) -> axum::response::Response {
+    if wants_html(&headers) {
+        Html(health_html()).into_response()
+    } else {
+        "ok".into_response()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -57,6 +63,61 @@ fn web_dir() -> PathBuf {
     std::env::var("ARSSM_WEB_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("web"))
+}
+
+fn wants_html(headers: &HeaderMap) -> bool {
+    headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.contains("text/html"))
+        .unwrap_or(false)
+}
+
+fn health_html() -> &'static str {
+    r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ARSSM Health</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      label { display: block; margin-bottom: 0.5rem; }
+      input { width: 100%; max-width: 720px; padding: 0.5rem; }
+      button { margin-top: 0.75rem; padding: 0.5rem 1rem; }
+      pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>ARSSM</h1>
+    <p>Status: ok</p>
+    <label for="workshop-url">Workshop URL</label>
+    <input id="workshop-url" type="text" value="https://reforger.armaplatform.com/workshop/595F2BF2F44836FB-RHS-StatusQuo">
+    <button id="resolve">Resolve</button>
+    <h2>Result</h2>
+    <pre id="output">Waiting for input.</pre>
+    <script>
+      const button = document.getElementById('resolve');
+      const output = document.getElementById('output');
+      button.addEventListener('click', async () => {
+        output.textContent = 'Resolving...';
+        const url = document.getElementById('workshop-url').value;
+        try {
+          const response = await fetch('/api/workshop/resolve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url, max_depth: 5 })
+          });
+          const data = await response.json();
+          output.textContent = JSON.stringify(data, null, 2);
+        } catch (error) {
+          output.textContent = 'Error: ' + error;
+        }
+      });
+    </script>
+  </body>
+</html>
+"#
 }
 
 fn config_path() -> PathBuf {

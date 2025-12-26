@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use scraper::{Html, Selector};
-use std::{collections::{HashSet, VecDeque}, sync::Arc};
+use std::{
+    collections::{HashSet, VecDeque},
+    sync::Arc,
+};
 
 const WORKSHOP_BASE_URL: &str = "https://reforger.armaplatform.com";
 
@@ -20,9 +23,8 @@ pub struct WorkshopResolveResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct WorkshopPage {
+pub struct WorkshopRootPage {
     pub workshop_id: String,
-    pub scenarios: Vec<String>,
     pub dependency_urls: Vec<String>,
 }
 
@@ -41,10 +43,20 @@ impl WorkshopResolver {
         Self { fetcher }
     }
 
-    pub async fn resolve(&self, url: &str, max_depth: usize) -> Result<WorkshopResolveResult, String> {
-        let html = self.fetcher.fetch_html(url).await?;
-        let root_page = parse_workshop_html(&html)?;
-        let root_id = root_page.workshop_id.clone();
+    pub async fn resolve(
+        &self,
+        url: &str,
+        max_depth: usize,
+    ) -> Result<WorkshopResolveResult, String> {
+        let root_id = extract_workshop_id_from_url(url)
+            .ok_or_else(|| "failed to extract workshop id from url".to_string())?;
+
+        let root_html = self.fetcher.fetch_html(url).await?;
+        let root_page = parse_root_page(&root_html, Some(&root_id))?;
+
+        let scenarios_url = format!("{url}/scenarios");
+        let scenarios_html = self.fetcher.fetch_html(&scenarios_url).await?;
+        let scenarios = parse_scenarios_page(&scenarios_html);
 
         let mut dependency_ids = Vec::new();
         let mut errors = Vec::new();
@@ -69,6 +81,8 @@ impl WorkshopResolver {
                 }
                 visited_urls.insert(dep_url.clone());
 
+                let dep_id_hint = extract_workshop_id_from_url(&dep_url);
+
                 let dep_html = match self.fetcher.fetch_html(&dep_url).await {
                     Ok(html) => html,
                     Err(err) => {
@@ -77,7 +91,7 @@ impl WorkshopResolver {
                     }
                 };
 
-                let dep_page = match parse_workshop_html(&dep_html) {
+                let dep_page = match parse_root_page(&dep_html, dep_id_hint.as_deref()) {
                     Ok(page) => page,
                     Err(err) => {
                         errors.push(format!("failed to parse dependency {dep_url}: {err}"));
@@ -102,7 +116,7 @@ impl WorkshopResolver {
         Ok(WorkshopResolveResult {
             root_id,
             root_url: url.to_string(),
-            scenarios: root_page.scenarios,
+            scenarios,
             dependency_ids,
             errors,
         })
@@ -142,25 +156,25 @@ impl WorkshopFetcher for ReqwestFetcher {
     }
 }
 
-pub fn parse_workshop_html(html: &str) -> Result<WorkshopPage, String> {
+pub fn parse_root_page(html: &str, expected_id: Option<&str>) -> Result<WorkshopRootPage, String> {
     let document = Html::parse_document(html);
 
-    let mut workshop_id = None;
-    let mut scenarios = Vec::new();
+    let mut workshop_id = expected_id.map(|value| value.to_string());
     let mut dependencies = Vec::new();
 
     if let Some(value) = extract_embedded_json(&document) {
-        workshop_id = extract_string(&value, &["workshopId", "id"]);
-        scenarios = extract_string_list(&value, &["scenarios"]);
+        if workshop_id.is_none() {
+            workshop_id = extract_string(&value, &["workshopId", "id"]);
+        }
         dependencies = extract_string_list(&value, &["dependencies"]);
     }
 
     if workshop_id.is_none() {
-        workshop_id = extract_workshop_id_from_data_props(&document);
+        workshop_id = extract_workshop_id_from_html(html);
     }
 
-    if scenarios.is_empty() {
-        scenarios = extract_scenarios_from_html(html);
+    if workshop_id.is_none() {
+        workshop_id = extract_workshop_id_from_data_props(&document);
     }
 
     if dependencies.is_empty() {
@@ -169,11 +183,9 @@ pub fn parse_workshop_html(html: &str) -> Result<WorkshopPage, String> {
 
     let workshop_id = workshop_id.ok_or_else(|| "workshop id not found".to_string())?;
     let dependency_urls = normalize_dependency_urls(dependencies);
-    let scenarios = dedupe_preserve_order(scenarios);
 
-    Ok(WorkshopPage {
+    Ok(WorkshopRootPage {
         workshop_id,
-        scenarios,
         dependency_urls,
     })
 }
@@ -182,6 +194,20 @@ pub fn extract_workshop_id_from_url(url: &str) -> Option<String> {
     let re = regex::Regex::new(r"/workshop/([A-F0-9]{16})").ok()?;
     re.captures(url)
         .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+}
+
+pub fn extract_workshop_id_from_html(html: &str) -> Option<String> {
+    let re = regex::Regex::new(r"\bID\s+([A-F0-9]{16})\b").ok()?;
+    re.captures(html)
+        .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))
+}
+
+pub fn parse_scenarios_page(html: &str) -> Vec<String> {
+    if !html.contains("Scenario ID") {
+        return Vec::new();
+    }
+
+    dedupe_preserve_order(extract_scenarios_from_html(html))
 }
 
 fn extract_embedded_json(document: &Html) -> Option<serde_json::Value> {
@@ -242,13 +268,40 @@ fn extract_scenarios_from_html(html: &str) -> Vec<String> {
 
 fn extract_dependency_urls(document: &Html) -> Vec<String> {
     let mut urls = Vec::new();
-    let selector = Selector::parse(r#"a[href*="/workshop/"]"#).expect("link selector");
-    for link in document.select(&selector) {
-        if let Some(href) = link.value().attr("href") {
-            push_unique(&mut urls, href.to_string());
+    if let Some(section_urls) = extract_dependency_urls_from_section(document) {
+        urls = section_urls;
+    }
+
+    if urls.is_empty() {
+        let selector = Selector::parse(r#"a[href*="/workshop/"]"#).expect("link selector");
+        for link in document.select(&selector) {
+            if let Some(href) = link.value().attr("href") {
+                push_unique(&mut urls, href.to_string());
+            }
         }
     }
     urls
+}
+
+fn extract_dependency_urls_from_section(document: &Html) -> Option<Vec<String>> {
+    let section_selector = Selector::parse("section, div").ok()?;
+    let link_selector = Selector::parse(r#"a[href*="/workshop/"]"#).ok()?;
+
+    for node in document.select(&section_selector) {
+        let text = node.text().collect::<String>();
+        if text.contains("Dependencies") {
+            let mut urls = Vec::new();
+            for link in node.select(&link_selector) {
+                if let Some(href) = link.value().attr("href") {
+                    push_unique(&mut urls, href.to_string());
+                }
+            }
+            if !urls.is_empty() {
+                return Some(urls);
+            }
+        }
+    }
+    None
 }
 
 fn normalize_dependency_urls(urls: Vec<String>) -> Vec<String> {
