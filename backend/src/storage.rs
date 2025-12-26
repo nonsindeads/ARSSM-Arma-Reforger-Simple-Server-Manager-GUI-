@@ -166,6 +166,24 @@ pub async fn save_profile(profile: &ServerProfile) -> Result<(), String> {
         .map_err(|err| format!("failed to move profile into place: {err}"))
 }
 
+pub async fn delete_profile(profile_id: &str) -> Result<(), String> {
+    let path = profile_path(profile_id);
+    if tokio::fs::metadata(&path).await.is_ok() {
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|err| format!("failed to remove profile: {err}"))?;
+    }
+
+    let profile_dir = profiles_dir().join(profile_id);
+    if tokio::fs::metadata(&profile_dir).await.is_ok() {
+        tokio::fs::remove_dir_all(&profile_dir)
+            .await
+            .map_err(|err| format!("failed to remove profile dir: {err}"))?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

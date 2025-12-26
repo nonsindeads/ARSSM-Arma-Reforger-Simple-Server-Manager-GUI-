@@ -6,8 +6,8 @@ use backend::{
     models::ServerProfile,
     runner::{RunManager, RunStatus},
     storage::{
-        AppSettings, generated_config_path, load_profile, load_settings, list_profiles,
-        save_profile, save_settings, settings_path,
+        AppSettings, delete_profile, generated_config_path, load_profile, load_settings,
+        list_profiles, save_profile, save_settings, settings_path,
     },
     workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver},
 };
@@ -70,9 +70,14 @@ async fn main() {
         .route("/api/run/stop", axum::routing::post(run_stop))
         .route("/api/run/logs/tail", get(run_logs_tail))
         .route("/api/run/logs/stream", get(run_logs_stream))
-        .route("/server", get(profiles_page).post(create_profile))
+        .route("/server", get(profiles_page))
         .route("/server/:profile_id", get(profile_detail))
         .route("/server/:profile_id/activate", axum::routing::post(activate_profile))
+        .route("/server/:profile_id/edit", get(edit_profile_page).post(save_profile_edit))
+        .route("/server/:profile_id/delete", axum::routing::post(delete_profile_action))
+        .route("/server/new", get(new_profile_page))
+        .route("/server/new/resolve", axum::routing::post(new_profile_resolve))
+        .route("/server/new/create", axum::routing::post(new_profile_create))
         .route(
             "/server/:profile_id/workshop",
             get(profile_workshop_page),
@@ -187,64 +192,6 @@ async fn profiles_page(
     Ok(Html(render_profiles_page(&profiles, settings.active_profile_id.as_deref(), None)))
 }
 
-#[derive(Deserialize)]
-struct CreateProfileForm {
-    display_name: String,
-    workshop_url: String,
-}
-
-async fn create_profile(
-    State(state): State<AppState>,
-    Form(form): Form<CreateProfileForm>,
-) -> Result<Html<String>, (StatusCode, String)> {
-    let display_name = form.display_name.trim().to_string();
-    let workshop_url = form.workshop_url.trim().to_string();
-
-    if display_name.is_empty() || workshop_url.is_empty() {
-        let profiles = list_profiles()
-            .await
-            .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-        let settings = load_settings(&state.settings_path)
-            .await
-            .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-        return Ok(Html(render_profiles_page(
-            &profiles,
-            settings.active_profile_id.as_deref(),
-            Some("Display name and workshop URL are required."),
-        )));
-    }
-
-    let profile = ServerProfile {
-        profile_id: new_profile_id(),
-        display_name,
-        workshop_url,
-        root_mod_id: None,
-        selected_scenario_id_path: None,
-        dependency_mod_ids: Vec::new(),
-        optional_mod_ids: Vec::new(),
-        load_session_save: false,
-        generated_config_path: None,
-        last_resolved_at: None,
-        last_resolve_hash: None,
-    };
-
-    save_profile(&profile)
-        .await
-        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-
-    let profiles = list_profiles()
-        .await
-        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let settings = load_settings(&state.settings_path)
-        .await
-        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-
-    Ok(Html(render_profiles_page(
-        &profiles,
-        settings.active_profile_id.as_deref(),
-        Some("Profile created."),
-    )))
-}
 
 async fn profile_detail(
     State(state): State<AppState>,
@@ -260,6 +207,159 @@ async fn profile_detail(
         &profile,
         settings.active_profile_id.as_deref(),
     )))
+}
+
+async fn edit_profile_page(
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    Ok(Html(render_profile_edit(&profile, None)))
+}
+
+#[derive(Deserialize)]
+struct EditProfileForm {
+    display_name: String,
+    workshop_url: String,
+}
+
+async fn save_profile_edit(
+    Path(profile_id): Path<String>,
+    Form(form): Form<EditProfileForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    if form.display_name.trim().is_empty() || form.workshop_url.trim().is_empty() {
+        return Ok(Html(render_profile_edit(
+            &profile,
+            Some("Display name and workshop URL are required."),
+        )));
+    }
+
+    profile.display_name = form.display_name.trim().to_string();
+    profile.workshop_url = form.workshop_url.trim().to_string();
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_profile_edit(&profile, Some("Profile updated."))))
+}
+
+async fn delete_profile_action(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    delete_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    let mut settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    if settings.active_profile_id.as_deref() == Some(&profile_id) {
+        settings.active_profile_id = None;
+        save_settings(&state.settings_path, &settings)
+            .await
+            .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    }
+
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_profiles_page(
+        &profiles,
+        settings.active_profile_id.as_deref(),
+        Some("Profile deleted."),
+    )))
+}
+
+async fn new_profile_page() -> Result<Html<String>, (StatusCode, String)> {
+    Ok(Html(render_new_profile_wizard(None)))
+}
+
+#[derive(Deserialize)]
+struct NewProfileResolveForm {
+    workshop_url: String,
+}
+
+async fn new_profile_resolve(
+    State(state): State<AppState>,
+    Form(form): Form<NewProfileResolveForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let url = form.workshop_url.trim();
+    if url.is_empty() {
+        return Ok(Html(render_new_profile_resolve(None, Some("Workshop URL is required."))));
+    }
+
+    let result = state
+        .workshop_resolver
+        .resolve(url, 5)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
+    Ok(Html(render_new_profile_resolve(Some(&result), None)))
+}
+
+#[derive(Deserialize)]
+struct NewProfileCreateForm {
+    display_name: String,
+    workshop_url: String,
+    root_mod_id: Option<String>,
+    dependency_mod_ids: Option<String>,
+    selected_scenario_id_path: Option<String>,
+    optional_mod_ids: Option<String>,
+}
+
+async fn new_profile_create(
+    Form(form): Form<NewProfileCreateForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    if form.display_name.trim().is_empty() || form.workshop_url.trim().is_empty() {
+        return Ok(Html(render_new_profile_wizard(Some(
+            "Display name and workshop URL are required.",
+        ))));
+    }
+
+    let selected_scenario = form
+        .selected_scenario_id_path
+        .as_deref()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if selected_scenario.is_empty() {
+        return Ok(Html(render_new_profile_wizard(Some(
+            "Scenario selection is required.",
+        ))));
+    }
+
+    let root_mod_id = form.root_mod_id.as_deref().unwrap_or("").trim().to_string();
+    if root_mod_id.is_empty() {
+        return Ok(Html(render_new_profile_wizard(Some(
+            "Workshop must be resolved before creating the profile.",
+        ))));
+    }
+
+    let profile = ServerProfile {
+        profile_id: new_profile_id(),
+        display_name: form.display_name.trim().to_string(),
+        workshop_url: form.workshop_url.trim().to_string(),
+        root_mod_id: Some(root_mod_id),
+        selected_scenario_id_path: Some(selected_scenario),
+        dependency_mod_ids: parse_mod_ids(form.dependency_mod_ids.as_deref().unwrap_or("")),
+        optional_mod_ids: parse_mod_ids(form.optional_mod_ids.as_deref().unwrap_or("")),
+        load_session_save: false,
+        generated_config_path: None,
+        last_resolved_at: None,
+        last_resolve_hash: None,
+    };
+
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_profile_detail(&profile, None)))
 }
 
 async fn activate_profile(
@@ -839,17 +939,7 @@ fn render_profiles_page(
     let content = format!(
         r#"<h1 class="h3 mb-3">Server / Profile</h1>
         {notice}
-        <form method="post" action="/server" class="card card-body mb-4">
-          <div class="mb-3">
-            <label class="form-label" for="display_name">Display name</label>
-            <input class="form-control" id="display_name" name="display_name">
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="workshop_url">Workshop URL</label>
-            <input class="form-control" id="workshop_url" name="workshop_url">
-          </div>
-          <button class="btn btn-primary" type="submit">Create profile</button>
-        </form>
+        <a class="btn btn-primary mb-3" href="/server/new">Neues Profil</a>
         <table class="table table-striped">
           <thead>
             <tr>
@@ -897,6 +987,7 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
         </dl>
         <a class="btn btn-outline-primary me-2" href="/server/{id}/workshop">Workshop resolve</a>
         <a class="btn btn-primary me-2" href="/server/{id}/config-preview">Config preview</a>
+        <a class="btn btn-outline-secondary me-2" href="/server/{id}/edit">Edit</a>
         <form class="d-inline" method="post" action="/server/{id}/activate">
           <button class="btn btn-outline-secondary" type="submit">Set active</button>
         </form>
@@ -921,6 +1012,174 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
             breadcrumb(&profile.display_name, None),
         ],
         &content,
+    )
+}
+
+fn render_profile_edit(profile: &ServerProfile, message: Option<&str>) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Edit Profile</h1>
+        {notice}
+        <form method="post" action="/server/{id}/edit" class="card card-body mb-4">
+          <div class="mb-3">
+            <label class="form-label" for="display_name">Display name</label>
+            <input class="form-control" id="display_name" name="display_name" value="{name}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="workshop_url">Workshop URL</label>
+            <input class="form-control" id="workshop_url" name="workshop_url" value="{url}">
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Save</button>
+            <a class="btn btn-outline-secondary" href="/server/{id}">Cancel</a>
+          </div>
+        </form>
+        <form method="post" action="/server/{id}/delete">
+          <button class="btn btn-outline-danger" type="submit">Delete profile</button>
+        </form>"#,
+        notice = notice,
+        id = html_escape::encode_text(&profile.profile_id),
+        name = html_escape::encode_text(&profile.display_name),
+        url = html_escape::encode_text(&profile.workshop_url),
+    );
+
+    render_layout(
+        "ARSSM Edit Profile",
+        "server",
+        vec![
+            breadcrumb("Server / Profile", Some("/server".to_string())),
+            breadcrumb(&profile.display_name, Some(format!("/server/{}", profile.profile_id))),
+            breadcrumb("Edit", None),
+        ],
+        &content,
+    )
+}
+
+fn render_new_profile_wizard(message: Option<&str>) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+    let content = format!(
+        r##"<h1 class="h3 mb-3">Neues Profil</h1>
+        {notice}
+        <form method="post" action="/server/new/create">
+          <div class="card card-body mb-4">
+            <h2 class="h5">Schritt 1: Workshop</h2>
+            <div class="mb-3">
+              <label class="form-label" for="display_name">Display name</label>
+              <input class="form-control" id="display_name" name="display_name">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="workshop_url">Workshop URL</label>
+              <input class="form-control" id="workshop_url" name="workshop_url">
+            </div>
+            <button type="button" class="btn btn-outline-secondary" hx-post="/server/new/resolve" hx-target="#wizard-resolve" hx-swap="outerHTML" hx-include="#workshop_url">Workshop laden</button>
+          </div>
+
+          <div id="wizard-resolve">
+            <div class="card card-body mb-4">
+              <h2 class="h5">Schritt 2: Szenario</h2>
+              <p class="text-muted">Workshop zuerst laden.</p>
+            </div>
+            <div class="card card-body mb-4">
+              <h2 class="h5">Schritt 3: Mod-Pakete</h2>
+              <p class="text-muted">Keine Pakete definiert.</p>
+            </div>
+            <div class="card card-body mb-4">
+              <h2 class="h5">Schritt 4: Konfiguration</h2>
+              <p class="text-muted">Defaults werden nach dem Laden angezeigt.</p>
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Profil erstellen</button>
+            <a class="btn btn-outline-secondary" href="/server">Abbrechen</a>
+          </div>
+        </form>"##,
+        notice = notice,
+    );
+
+    render_layout(
+        "ARSSM New Profile",
+        "server",
+        vec![
+            breadcrumb("Server / Profile", Some("/server".to_string())),
+            breadcrumb("New Profile", None),
+        ],
+        &content,
+    )
+}
+
+fn render_new_profile_resolve(
+    resolved: Option<&backend::workshop::WorkshopResolveResult>,
+    message: Option<&str>,
+) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-warning\">{value}</p>"))
+        .unwrap_or_default();
+
+    let mut scenario_options = String::new();
+    let mut dependency_ids = String::new();
+    let mut root_id = String::new();
+    let mut errors = String::new();
+    if let Some(result) = resolved {
+        root_id = result.root_id.clone();
+        dependency_ids = result.dependency_ids.join(",");
+        if result.scenarios.is_empty() {
+            scenario_options.push_str("<option value=\"\">No scenarios found</option>");
+        } else {
+            for scenario in result.scenarios.iter() {
+                scenario_options.push_str(&format!(
+                    r#"<option value="{value}">{value}</option>"#,
+                    value = html_escape::encode_text(scenario),
+                ));
+            }
+        }
+        if result.errors.is_empty() {
+            errors.push_str("<li>No errors.</li>");
+        } else {
+            for err in result.errors.iter() {
+                errors.push_str(&format!("<li>{}</li>", html_escape::encode_text(err)));
+            }
+        }
+    }
+
+    format!(
+        r##"<div id="wizard-resolve">
+          <div class="card card-body mb-4">
+            <h2 class="h5">Schritt 2: Szenario</h2>
+            {notice}
+            <input type="hidden" name="root_mod_id" value="{root_id}">
+            <input type="hidden" name="dependency_mod_ids" value="{dependency_ids}">
+            <div class="mb-3">
+              <label class="form-label" for="selected_scenario_id_path">Scenario</label>
+              <select class="form-select" id="selected_scenario_id_path" name="selected_scenario_id_path">
+                {scenario_options}
+              </select>
+            </div>
+          </div>
+          <div class="card card-body mb-4">
+            <h2 class="h5">Schritt 3: Mod-Pakete</h2>
+            <p class="text-muted">Pakete-Logik folgt.</p>
+            <label class="form-label" for="optional_mod_ids">Optional mods (one ID per line)</label>
+            <textarea class="form-control" id="optional_mod_ids" name="optional_mod_ids" rows="4"></textarea>
+          </div>
+          <div class="card card-body mb-4">
+            <h2 class="h5">Schritt 4: Konfiguration</h2>
+            <p class="text-muted">Standardwerte basieren auf server.sample.json.</p>
+          </div>
+          <div class="card card-body">
+            <h2 class="h6">Resolve Errors</h2>
+            <ul>{errors}</ul>
+          </div>
+        </div>"##,
+        notice = notice,
+        root_id = html_escape::encode_text(&root_id),
+        dependency_ids = html_escape::encode_text(&dependency_ids),
+        scenario_options = scenario_options,
+        errors = errors,
     )
 }
 
