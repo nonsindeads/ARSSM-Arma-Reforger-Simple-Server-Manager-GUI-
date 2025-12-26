@@ -1,7 +1,10 @@
 use axum::{
-    Json, Router, extract::State, http::{HeaderMap, StatusCode}, response::{Html, IntoResponse}, routing::get
+    Form, Json, Router, extract::State, http::{HeaderMap, StatusCode}, response::{Html, IntoResponse}, routing::get
 };
-use backend::workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver};
+use backend::{
+    storage::{AppSettings, load_settings, save_settings, settings_path},
+    workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver},
+};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use std::{io, path::PathBuf};
@@ -29,6 +32,7 @@ struct AppConfig {
 struct AppState {
     config_path: PathBuf,
     workshop_resolver: WorkshopResolver,
+    settings_path: PathBuf,
 }
 
 #[tokio::main]
@@ -42,11 +46,14 @@ async fn main() {
     let state = AppState {
         config_path: config_path(),
         workshop_resolver: WorkshopResolver::new(std::sync::Arc::new(ReqwestFetcher::new())),
+        settings_path: settings_path(),
     };
 
     let app = Router::new()
         .route("/api/config", get(get_config).post(set_config))
         .route("/api/workshop/resolve", axum::routing::post(resolve_workshop))
+        .route("/api/settings", get(get_settings_api).post(save_settings_api))
+        .route("/settings", get(settings_page).post(settings_save))
         .route("/health", get(health))
         .route_service("/", ServeFile::new(index_file))
         .nest_service("/web", ServeDir::new(web_dir))
@@ -118,6 +125,134 @@ fn health_html() -> &'static str {
   </body>
 </html>
 "#
+}
+
+async fn settings_page(
+    State(state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_settings_page(&settings, None)))
+}
+
+#[derive(Deserialize)]
+struct SettingsForm {
+    steamcmd_dir: String,
+    reforger_server_exe: String,
+    reforger_server_work_dir: String,
+    profile_dir_base: String,
+}
+
+async fn settings_save(
+    State(state): State<AppState>,
+    Form(form): Form<SettingsForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let settings = AppSettings {
+        steamcmd_dir: form.steamcmd_dir,
+        reforger_server_exe: form.reforger_server_exe,
+        reforger_server_work_dir: form.reforger_server_work_dir,
+        profile_dir_base: form.profile_dir_base,
+    };
+
+    if let Err(message) = settings.validate() {
+        return Ok(Html(render_settings_page(&settings, Some(&message))));
+    }
+
+    save_settings(&state.settings_path, &settings)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_settings_page(&settings, Some("Settings saved."))))
+}
+
+async fn get_settings_api(
+    State(state): State<AppState>,
+) -> Result<Json<AppSettings>, (StatusCode, String)> {
+    load_settings(&state.settings_path)
+        .await
+        .map(Json)
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))
+}
+
+async fn save_settings_api(
+    State(state): State<AppState>,
+    Json(settings): Json<AppSettings>,
+) -> Result<Json<AppSettings>, (StatusCode, String)> {
+    if let Err(message) = settings.validate() {
+        return Err((StatusCode::BAD_REQUEST, message));
+    }
+
+    save_settings(&state.settings_path, &settings)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Json(settings))
+}
+
+fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String {
+    let notice = message.map(|value| format!("<p class=\"text-success\">{value}</p>")).unwrap_or_default();
+    format!(
+        r#"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ARSSM Settings</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    >
+  </head>
+  <body>
+    <div class="container-fluid">
+      <div class="row">
+        <nav class="col-12 col-md-3 col-lg-2 bg-light border-end min-vh-100 p-3">
+          <h2 class="h5">ARSSM</h2>
+          <ul class="nav flex-column">
+            <li class="nav-item"><a class="nav-link" href="/">Dashboard</a></li>
+            <li class="nav-item"><a class="nav-link" href="/profiles">Profiles</a></li>
+            <li class="nav-item"><a class="nav-link" href="/workshop">Workshop Resolve</a></li>
+            <li class="nav-item"><a class="nav-link" href="/config-preview">Config Preview</a></li>
+            <li class="nav-item"><a class="nav-link" href="/run-logs">Run & Logs</a></li>
+            <li class="nav-item"><a class="nav-link active" href="/settings">Settings</a></li>
+          </ul>
+        </nav>
+        <main class="col-12 col-md-9 col-lg-10 p-4">
+          <h1 class="h3 mb-3">Settings</h1>
+          {notice}
+          <form method="post" action="/settings">
+            <div class="mb-3">
+              <label class="form-label" for="steamcmd_dir">SteamCMD directory</label>
+              <input class="form-control" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="reforger_server_exe">Reforger server executable</label>
+              <input class="form-control" id="reforger_server_exe" name="reforger_server_exe" value="{reforger_server_exe}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="reforger_server_work_dir">Reforger server work dir</label>
+              <input class="form-control" id="reforger_server_work_dir" name="reforger_server_work_dir" value="{reforger_server_work_dir}">
+            </div>
+            <div class="mb-3">
+              <label class="form-label" for="profile_dir_base">Profile base directory</label>
+              <input class="form-control" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
+            </div>
+            <button class="btn btn-primary" type="submit">Save</button>
+          </form>
+        </main>
+      </div>
+    </div>
+  </body>
+</html>"#,
+        notice = notice,
+        steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
+        reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
+        reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
+        profile_dir_base = html_escape::encode_text(&settings.profile_dir_base),
+    )
 }
 
 fn config_path() -> PathBuf {

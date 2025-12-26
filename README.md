@@ -9,6 +9,12 @@ The backend stores configuration in a single JSON file.
 
 The web UI directory can be overridden with `ARSSM_WEB_DIR`.
 
+## Settings storage
+
+Settings are stored under the per-user app data directory:
+- Windows: `%APPDATA%\arssm\settings.json`
+- Fallback: `~/.config/arssm/settings.json`
+
 ## Workshop resolver
 
 `POST /api/workshop/resolve` resolves a workshop URL into the root ID, available scenarios,
