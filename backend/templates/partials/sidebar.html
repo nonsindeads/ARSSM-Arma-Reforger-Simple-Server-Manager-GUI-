@@ -1,0 +1,8 @@
+<h2 class="h5 text-uppercase text-muted">ARSSM</h2>
+<ul class="nav flex-column">
+  {% for item in nav_items %}
+  <li class="nav-item">
+    <a class="nav-link{% if item.key == active %} active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
+  </li>
+  {% endfor %}
+</ul>

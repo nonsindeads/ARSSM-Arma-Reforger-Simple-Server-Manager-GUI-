@@ -17,3 +17,5 @@ scraper = "0.19"
 regex = "1"
 html-escape = "0.2"
 tokio-stream = { version = "0.1", features = ["sync"] }
+minijinja = { version = "2", features = ["loader"] }
+time = { version = "0.3", features = ["formatting", "local-offset"] }

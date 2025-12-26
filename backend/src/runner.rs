@@ -23,6 +23,7 @@ struct RunInner {
     child: Option<Child>,
     profile_id: Option<String>,
     pid: Option<u32>,
+    started_at: Option<u64>,
     buffer: VecDeque<String>,
 }
 
@@ -31,6 +32,7 @@ pub struct RunStatus {
     pub running: bool,
     pub pid: Option<u32>,
     pub profile_id: Option<String>,
+    pub started_at: Option<u64>,
 }
 
 impl RunManager {
@@ -40,6 +42,7 @@ impl RunManager {
             child: None,
             profile_id: None,
             pid: None,
+            started_at: None,
             buffer: VecDeque::new(),
         };
         Self {
@@ -65,6 +68,7 @@ impl RunManager {
             running: inner.child.is_some(),
             pid: inner.pid,
             profile_id: inner.profile_id.clone(),
+            started_at: inner.started_at,
         }
     }
 
@@ -108,6 +112,7 @@ impl RunManager {
         let stderr = child.stderr.take();
         inner.pid = child.id();
         inner.profile_id = Some(profile.profile_id.clone());
+        inner.started_at = Some(current_epoch_seconds());
         inner.child = Some(child);
 
         if let Some(stdout) = stdout {
@@ -138,6 +143,7 @@ impl RunManager {
             let mut inner = self.inner.lock().await;
             inner.profile_id = None;
             inner.pid = None;
+            inner.started_at = None;
             inner.child.take()
         };
 
@@ -161,6 +167,13 @@ impl RunManager {
         inner.buffer.push_back(line.clone());
         let _ = self.sender.send(line);
     }
+}
+
+fn current_epoch_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
 }
 
 #[cfg(test)]

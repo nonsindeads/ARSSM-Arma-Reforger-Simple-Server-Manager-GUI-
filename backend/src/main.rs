@@ -17,6 +17,8 @@ use std::{io, path::PathBuf};
 use tower_http::services::ServeDir;
 use axum::response::sse::{Event, Sse};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
+use minijinja::{Environment, context};
+use std::sync::OnceLock;
 
 async fn health(headers: HeaderMap) -> axum::response::Response {
     if wants_html(&headers) {
@@ -68,35 +70,36 @@ async fn main() {
         .route("/api/run/stop", axum::routing::post(run_stop))
         .route("/api/run/logs/tail", get(run_logs_tail))
         .route("/api/run/logs/stream", get(run_logs_stream))
-        .route("/profiles", get(profiles_page).post(create_profile))
-        .route("/profiles/:profile_id", get(profile_detail))
+        .route("/server", get(profiles_page).post(create_profile))
+        .route("/server/:profile_id", get(profile_detail))
         .route(
-            "/profiles/:profile_id/workshop",
+            "/server/:profile_id/workshop",
             get(profile_workshop_page),
         )
         .route(
-            "/profiles/:profile_id/workshop/resolve",
+            "/server/:profile_id/workshop/resolve",
             axum::routing::post(profile_workshop_resolve),
         )
         .route(
-            "/profiles/:profile_id/workshop/save",
+            "/server/:profile_id/workshop/save",
             axum::routing::post(profile_workshop_save),
         )
         .route(
-            "/profiles/:profile_id/config-preview",
+            "/server/:profile_id/config-preview",
             get(config_preview_page).post(config_preview_partial),
         )
         .route(
-            "/profiles/:profile_id/config-write",
+            "/server/:profile_id/config-write",
             axum::routing::post(write_config),
         )
         .route(
-            "/profiles/:profile_id/config-regenerate",
+            "/server/:profile_id/config-regenerate",
             axum::routing::post(regenerate_config),
         )
+        .route("/packages", get(packages_page))
         .route("/run-logs", get(run_logs_page))
         .route("/settings", get(settings_page).post(settings_save))
-        .route("/workshop", get(workshop_list_page))
+        .route("/partials/header-status", get(header_status_partial))
         .route("/health", get(health))
         .route("/", get(dashboard_page))
         .nest_service("/web", ServeDir::new(web_dir))
@@ -236,11 +239,14 @@ async fn profile_detail(
     Ok(Html(render_profile_detail(&profile)))
 }
 
-async fn workshop_list_page() -> Result<Html<String>, (StatusCode, String)> {
-    let profiles = list_profiles()
-        .await
-        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    Ok(Html(render_workshop_list(&profiles)))
+async fn packages_page() -> Result<Html<String>, (StatusCode, String)> {
+    let content = "<h1 class=\"h3 mb-3\">Pakete / Mods</h1><p class=\"text-muted\">Noch keine Pakete definiert.</p>".to_string();
+    Ok(Html(render_layout(
+        "ARSSM Pakete",
+        "packages",
+        vec![breadcrumb("Pakete / Mods", None)],
+        &content,
+    )))
 }
 
 async fn profile_workshop_page(
@@ -470,6 +476,37 @@ async fn run_logs_page() -> Result<Html<String>, (StatusCode, String)> {
     Ok(Html(render_run_logs_page(&profiles)))
 }
 
+async fn header_status_partial(
+    State(state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let status = state.run_manager.status().await;
+    let datetime = current_datetime();
+    let uptime = status
+        .started_at
+        .map(|secs| format_duration(secs))
+        .unwrap_or_else(|| "n/a".to_string());
+    let run_status = if status.running {
+        format!("running ({})", status.profile_id.unwrap_or_else(|| "unknown".to_string()))
+    } else {
+        "stopped".to_string()
+    };
+
+    let context = context! {
+        datetime => datetime,
+        run_status => run_status,
+        uptime => uptime,
+        cpu => "n/a",
+        ram => "n/a",
+    };
+
+    let html = template_env()
+        .get_template("partials/header_status.html")
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?
+        .render(context)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    Ok(Html(html))
+}
+
 async fn dashboard_page(
     State(state): State<AppState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -504,7 +541,7 @@ async fn dashboard_page(
           <div class="col-md-4">
             <div class="card card-body">
               <h2 class="h6">Quick Links</h2>
-              <a href="/profiles" class="d-block">Profiles</a>
+              <a href="/server" class="d-block">Server / Profile</a>
               <a href="/workshop" class="d-block">Workshop Resolve</a>
               <a href="/run-logs" class="d-block">Run & Logs</a>
             </div>
@@ -514,7 +551,12 @@ async fn dashboard_page(
         settings_status = settings_status,
     );
 
-    Ok(Html(render_layout("ARSSM Dashboard", "dashboard", &content)))
+    Ok(Html(render_layout(
+        "ARSSM Dashboard",
+        "dashboard",
+        vec![breadcrumb("Dashboard", None)],
+        &content,
+    )))
 }
 
 #[derive(Deserialize)]
@@ -636,7 +678,12 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
         content = content
     );
 
-    render_layout("ARSSM Settings", "settings", &content)
+    render_layout(
+        "ARSSM Settings",
+        "settings",
+        vec![breadcrumb("Settings", None)],
+        &content,
+    )
 }
 
 fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> String {
@@ -648,7 +695,7 @@ fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> St
     for profile in profiles {
         rows.push_str(&format!(
             r#"<tr>
-              <td><a href="/profiles/{id}">{name}</a></td>
+              <td><a href="/server/{id}">{name}</a></td>
               <td>{url}</td>
             </tr>"#,
             id = html_escape::encode_text(&profile.profile_id),
@@ -664,7 +711,7 @@ fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> St
     let content = format!(
         r#"<h1 class="h3 mb-3">Profiles</h1>
         {notice}
-        <form method="post" action="/profiles" class="card card-body mb-4">
+        <form method="post" action="/server" class="card card-body mb-4">
           <div class="mb-3">
             <label class="form-label" for="display_name">Display name</label>
             <input class="form-control" id="display_name" name="display_name">
@@ -690,7 +737,12 @@ fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> St
         rows = rows,
     );
 
-    render_layout("ARSSM Profiles", "profiles", &content)
+    render_layout(
+        "ARSSM Server / Profile",
+        "server",
+        vec![breadcrumb("Server / Profile", None)],
+        &content,
+    )
 }
 
 fn render_profile_detail(profile: &ServerProfile) -> String {
@@ -704,9 +756,9 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
           <dt class="col-sm-3">Selected scenario</dt>
           <dd class="col-sm-9">{scenario}</dd>
         </dl>
-        <a class="btn btn-outline-primary me-2" href="/profiles/{id}/workshop">Workshop resolve</a>
-        <a class="btn btn-primary me-2" href="/profiles/{id}/config-preview">Config preview</a>
-        <a class="btn btn-outline-secondary" href="/profiles">Back to profiles</a>"#,
+        <a class="btn btn-outline-primary me-2" href="/server/{id}/workshop">Workshop resolve</a>
+        <a class="btn btn-primary me-2" href="/server/{id}/config-preview">Config preview</a>
+        <a class="btn btn-outline-secondary" href="/server">Back to profiles</a>"#,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
         url = html_escape::encode_text(&profile.workshop_url),
@@ -718,44 +770,15 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
         ),
     );
 
-    render_layout("ARSSM Profile", "profiles", &content)
-}
-
-fn render_workshop_list(profiles: &[ServerProfile]) -> String {
-    let mut rows = String::new();
-    for profile in profiles {
-        rows.push_str(&format!(
-            r#"<tr>
-              <td><a href="/profiles/{id}/workshop">{name}</a></td>
-              <td>{url}</td>
-            </tr>"#,
-            id = html_escape::encode_text(&profile.profile_id),
-            name = html_escape::encode_text(&profile.display_name),
-            url = html_escape::encode_text(&profile.workshop_url),
-        ));
-    }
-
-    if rows.is_empty() {
-        rows.push_str("<tr><td colspan=\"2\">No profiles available.</td></tr>");
-    }
-
-    let content = format!(
-        r#"<h1 class="h3 mb-3">Workshop Resolve</h1>
-        <table class="table table-striped">
-          <thead>
-            <tr>
-              <th>Profile</th>
-              <th>Workshop URL</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows}
-          </tbody>
-        </table>"#,
-        rows = rows,
-    );
-
-    render_layout("ARSSM Workshop", "workshop", &content)
+    render_layout(
+        "ARSSM Profile",
+        "server",
+        vec![
+            breadcrumb("Server / Profile", Some("/server".to_string())),
+            breadcrumb(&profile.display_name, None),
+        ],
+        &content,
+    )
 }
 
 fn render_workshop_page(
@@ -773,9 +796,9 @@ fn render_workshop_page(
         <div class="card card-body mb-4">
           <p class="mb-1"><strong>Profile:</strong> {name}</p>
           <p class="mb-3"><strong>Workshop URL:</strong> {url}</p>
-          <form method="post" action="/profiles/{id}/workshop/resolve" hx-post="/profiles/{id}/workshop/resolve" hx-target="#workshop-resolve-panel" hx-swap="outerHTML">
+          <form method="post" action="/server/{id}/workshop/resolve" hx-post="/server/{id}/workshop/resolve" hx-target="#workshop-resolve-panel" hx-swap="outerHTML">
             <button class="btn btn-primary" type="submit">Resolve</button>
-            <a class="btn btn-outline-secondary ms-2" href="/profiles/{id}/config-preview">Go to Config Preview</a>
+            <a class="btn btn-outline-secondary ms-2" href="/server/{id}/config-preview">Go to Config Preview</a>
           </form>
         </div>
         {panel}"##,
@@ -786,7 +809,16 @@ fn render_workshop_page(
         panel = render_workshop_panel(profile, resolved, None),
     );
 
-    render_layout("ARSSM Workshop Resolve", "workshop", &content)
+    render_layout(
+        "ARSSM Workshop Resolve",
+        "server",
+        vec![
+            breadcrumb("Server / Profile", Some("/server".to_string())),
+            breadcrumb(&profile.display_name, Some(format!("/server/{}", profile.profile_id))),
+            breadcrumb("Workshop Resolve", None),
+        ],
+        &content,
+    )
 }
 
 fn render_workshop_panel(
@@ -867,7 +899,7 @@ fn render_workshop_panel(
         {notice}
         <div class="card card-body mb-4">
           <h2 class="h5">Scenario Selection {selection_badge}</h2>
-          <form method="post" action="/profiles/{id}/workshop/save">
+          <form method="post" action="/server/{id}/workshop/save">
             <div class="mb-3">
               <label class="form-label" for="scenario">Scenario</label>
               <select class="form-select" id="scenario" name="selected_scenario_id_path">
@@ -880,7 +912,7 @@ fn render_workshop_panel(
             </div>
             <div class="d-flex gap-2">
               <button class="btn btn-success" type="submit">Save selection</button>
-              <a class="btn btn-outline-secondary" href="/profiles/{id}/config-preview">Config Preview</a>
+              <a class="btn btn-outline-secondary" href="/server/{id}/config-preview">Config Preview</a>
             </div>
           </form>
         </div>
@@ -918,23 +950,32 @@ fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option
           {preview_block}
         </div>
         <div class="d-flex gap-2">
-          <form method="post" action="/profiles/{id}/config-write">
+          <form method="post" action="/server/{id}/config-write">
             <button class="btn btn-primary" type="submit">Write file</button>
           </form>
-          <button class="btn btn-outline-secondary" hx-post="/profiles/{id}/config-preview" hx-target="#config-preview" hx-swap="innerHTML">Resolve & Regenerate</button>
-          <form method="post" action="/profiles/{id}/config-regenerate">
+          <button class="btn btn-outline-secondary" hx-post="/server/{id}/config-preview" hx-target="#config-preview" hx-swap="innerHTML">Resolve & Regenerate</button>
+          <form method="post" action="/server/{id}/config-regenerate">
             <button class="btn btn-outline-secondary" type="submit">Regenerate (full)</button>
           </form>
         </div>
         <div class="mt-3">
-          <a class="btn btn-outline-secondary" href="/profiles/{id}">Back to profile</a>
+          <a class="btn btn-outline-secondary" href="/server/{id}">Back to profile</a>
         </div>"##,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
         preview_block = render_config_preview_partial(preview, message),
     );
 
-    render_layout("ARSSM Config Preview", "config", &content)
+    render_layout(
+        "ARSSM Config Preview",
+        "server",
+        vec![
+            breadcrumb("Server / Profile", Some("/server".to_string())),
+            breadcrumb(&profile.display_name, Some(format!("/server/{}", profile.profile_id))),
+            breadcrumb("Config Preview", None),
+        ],
+        &content,
+    )
 }
 
 fn render_config_preview_partial(preview: &str, message: Option<&str>) -> String {
@@ -1030,62 +1071,48 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
         options = options,
     );
 
-    render_layout("ARSSM Run & Logs", "run", &content)
+    render_layout(
+        "ARSSM Run & Logs",
+        "run",
+        vec![breadcrumb("Run / Logs", None)],
+        &content,
+    )
 }
 
-fn render_layout(title: &str, active: &str, content: &str) -> String {
-    let nav_items = [
-        ("Dashboard", "/", "dashboard"),
-        ("Profiles", "/profiles", "profiles"),
-        ("Workshop Resolve", "/workshop", "workshop"),
-        ("Config Preview", "/config-preview", "config"),
-        ("Run & Logs", "/run-logs", "run"),
-        ("Settings", "/settings", "settings"),
+#[derive(Serialize)]
+struct NavItem {
+    label: String,
+    href: String,
+    key: String,
+}
+
+#[derive(Serialize)]
+struct Breadcrumb {
+    label: String,
+    href: Option<String>,
+}
+
+fn render_layout(title: &str, active: &str, breadcrumbs: Vec<Breadcrumb>, content: &str) -> String {
+    let nav_items = vec![
+        NavItem { label: "Dashboard".to_string(), href: "/".to_string(), key: "dashboard".to_string() },
+        NavItem { label: "Server / Profile".to_string(), href: "/server".to_string(), key: "server".to_string() },
+        NavItem { label: "Pakete / Mods".to_string(), href: "/packages".to_string(), key: "packages".to_string() },
+        NavItem { label: "Run / Logs".to_string(), href: "/run-logs".to_string(), key: "run".to_string() },
+        NavItem { label: "Settings".to_string(), href: "/settings".to_string(), key: "settings".to_string() },
     ];
 
-    let mut nav_html = String::new();
-    for (label, href, key) in nav_items {
-        let class = if key == active { "nav-link active" } else { "nav-link" };
-        nav_html.push_str(&format!(
-            r#"<li class="nav-item"><a class="{class}" href="{href}">{label}</a></li>"#
-        ));
-    }
+    let env = template_env();
+    let context = context! {
+        title => title,
+        active => active,
+        nav_items => nav_items,
+        breadcrumbs => breadcrumbs,
+        content => content,
+    };
 
-    format!(
-        r#"<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{title}</title>
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
-      rel="stylesheet"
-      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
-      crossorigin="anonymous"
-    >
-    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  </head>
-  <body>
-    <div class="container-fluid">
-      <div class="row">
-        <nav class="col-12 col-md-3 col-lg-2 bg-light border-end min-vh-100 p-3">
-          <h2 class="h5">ARSSM</h2>
-          <ul class="nav flex-column">
-            {nav_html}
-          </ul>
-        </nav>
-        <main class="col-12 col-md-9 col-lg-10 p-4">
-          {content}
-        </main>
-      </div>
-    </div>
-  </body>
-</html>"#,
-        title = html_escape::encode_text(title),
-        nav_html = nav_html,
-        content = content,
-    )
+    env.get_template("layouts/base.html")
+        .and_then(|template| template.render(context))
+        .unwrap_or_else(|err| format!("Template error: {err}"))
 }
 
 fn new_profile_id() -> String {
@@ -1107,6 +1134,30 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+}
+
+fn template_env() -> &'static Environment<'static> {
+    static ENV: OnceLock<Environment<'static>> = OnceLock::new();
+    ENV.get_or_init(|| {
+        let mut env = Environment::new();
+        env.set_loader(minijinja::path_loader(templates_dir()));
+        env.set_auto_escape_callback(|_| minijinja::AutoEscape::Html);
+        env
+    })
+}
+
+fn templates_dir() -> String {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("templates")
+        .to_string_lossy()
+        .to_string()
+}
+
+fn breadcrumb(label: &str, href: Option<String>) -> Breadcrumb {
+    Breadcrumb {
+        label: label.to_string(),
+        href,
+    }
 }
 
 fn is_hx_request(headers: &HeaderMap) -> bool {
@@ -1163,6 +1214,25 @@ fn now_timestamp() -> String {
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
     seconds.to_string()
+}
+
+fn current_datetime() -> String {
+    let format = time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]")
+        .unwrap_or_else(|_| time::format_description::parse("[year]-[month]-[day]").expect("format"));
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    now.format(&format).unwrap_or_else(|_| "n/a".to_string())
+}
+
+fn format_duration(started_at: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let total = now.saturating_sub(started_at);
+    let hours = total / 3600;
+    let minutes = (total % 3600) / 60;
+    let seconds = total % 60;
+    format!("{hours}h {minutes}m {seconds}s")
 }
 
 #[derive(Deserialize)]
