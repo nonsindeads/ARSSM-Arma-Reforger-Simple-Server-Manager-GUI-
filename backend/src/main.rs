@@ -63,6 +63,7 @@ async fn main() {
         .route("/api/config", get(get_config).post(set_config))
         .route("/api/workshop/resolve", axum::routing::post(resolve_workshop))
         .route("/api/settings", get(get_settings_api).post(save_settings_api))
+        .route("/api/steamcmd/update", axum::routing::post(steamcmd_update))
         .route("/api/run/status", get(run_status))
         .route("/api/run/start", axum::routing::post(run_start))
         .route("/api/run/stop", axum::routing::post(run_stop))
@@ -339,6 +340,19 @@ async fn save_settings_api(
     Ok(Json(settings))
 }
 
+#[derive(serde::Serialize)]
+struct SteamcmdUpdateResponse {
+    status: String,
+    message: String,
+}
+
+async fn steamcmd_update() -> Json<SteamcmdUpdateResponse> {
+    Json(SteamcmdUpdateResponse {
+        status: "placeholder".to_string(),
+        message: "SteamCMD update is not implemented yet.".to_string(),
+    })
+}
+
 fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String {
     let notice = message
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
@@ -370,6 +384,25 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
         reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
         reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
         profile_dir_base = html_escape::encode_text(&settings.profile_dir_base),
+    );
+
+    let content = format!(
+        r#"{content}
+        <hr>
+        <h2 class="h5">SteamCMD Update</h2>
+        <p class="text-muted">Placeholder action for MVP2.</p>
+        <button class="btn btn-outline-primary" id="steamcmd-update">Run update</button>
+        <p class="mt-2" id="steamcmd-status"></p>
+        <script>
+          document.getElementById('steamcmd-update').addEventListener('click', async () => {{
+            const status = document.getElementById('steamcmd-status');
+            status.textContent = 'Running...';
+            const response = await fetch('/api/steamcmd/update', {{ method: 'POST' }});
+            const data = await response.json();
+            status.textContent = data.message;
+          }});
+        </script>"#,
+        content = content
     );
 
     render_layout("ARSSM Settings", "settings", &content)

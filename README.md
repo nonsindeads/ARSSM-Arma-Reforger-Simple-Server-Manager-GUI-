@@ -47,3 +47,7 @@ The backend exposes basic run endpoints and an SSE log stream:
 - `POST /api/run/stop`
 - `GET /api/run/status`
 - `GET /api/run/logs/stream`
+
+## SteamCMD update (placeholder)
+
+`POST /api/steamcmd/update` returns a placeholder response for now.
