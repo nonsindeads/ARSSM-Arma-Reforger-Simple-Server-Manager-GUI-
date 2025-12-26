@@ -1,8 +1,9 @@
 use axum::{
-    Form, Json, Router, extract::State, http::{HeaderMap, StatusCode}, response::{Html, IntoResponse}, routing::get
+    Form, Json, Router, extract::{Path, State}, http::{HeaderMap, StatusCode}, response::{Html, IntoResponse}, routing::get
 };
 use backend::{
-    storage::{AppSettings, load_settings, save_settings, settings_path},
+    models::ServerProfile,
+    storage::{AppSettings, load_profile, load_settings, list_profiles, save_profile, save_settings, settings_path},
     workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver},
 };
 use serde::{Deserialize, Serialize};
@@ -53,6 +54,8 @@ async fn main() {
         .route("/api/config", get(get_config).post(set_config))
         .route("/api/workshop/resolve", axum::routing::post(resolve_workshop))
         .route("/api/settings", get(get_settings_api).post(save_settings_api))
+        .route("/profiles", get(profiles_page).post(create_profile))
+        .route("/profiles/:profile_id", get(profile_detail))
         .route("/settings", get(settings_page).post(settings_save))
         .route("/health", get(health))
         .route_service("/", ServeFile::new(index_file))
@@ -127,6 +130,71 @@ fn health_html() -> &'static str {
 "#
 }
 
+async fn profiles_page() -> Result<Html<String>, (StatusCode, String)> {
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_profiles_page(&profiles, None)))
+}
+
+#[derive(Deserialize)]
+struct CreateProfileForm {
+    display_name: String,
+    workshop_url: String,
+}
+
+async fn create_profile(
+    Form(form): Form<CreateProfileForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let display_name = form.display_name.trim().to_string();
+    let workshop_url = form.workshop_url.trim().to_string();
+
+    if display_name.is_empty() || workshop_url.is_empty() {
+        let profiles = list_profiles()
+            .await
+            .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+        return Ok(Html(render_profiles_page(
+            &profiles,
+            Some("Display name and workshop URL are required."),
+        )));
+    }
+
+    let profile = ServerProfile {
+        profile_id: new_profile_id(),
+        display_name,
+        workshop_url,
+        root_mod_id: None,
+        selected_scenario_id_path: None,
+        dependency_mod_ids: Vec::new(),
+        optional_mod_ids: Vec::new(),
+        generated_config_path: None,
+        last_resolved_at: None,
+        last_resolve_hash: None,
+    };
+
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_profiles_page(
+        &profiles,
+        Some("Profile created."),
+    )))
+}
+
+async fn profile_detail(
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    Ok(Html(render_profile_detail(&profile)))
+}
+
 async fn settings_page(
     State(state): State<AppState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -191,14 +259,146 @@ async fn save_settings_api(
 }
 
 fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String {
-    let notice = message.map(|value| format!("<p class=\"text-success\">{value}</p>")).unwrap_or_default();
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Settings</h1>
+        {notice}
+        <form method="post" action="/settings">
+          <div class="mb-3">
+            <label class="form-label" for="steamcmd_dir">SteamCMD directory</label>
+            <input class="form-control" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="reforger_server_exe">Reforger server executable</label>
+            <input class="form-control" id="reforger_server_exe" name="reforger_server_exe" value="{reforger_server_exe}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="reforger_server_work_dir">Reforger server work dir</label>
+            <input class="form-control" id="reforger_server_work_dir" name="reforger_server_work_dir" value="{reforger_server_work_dir}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="profile_dir_base">Profile base directory</label>
+            <input class="form-control" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
+          </div>
+          <button class="btn btn-primary" type="submit">Save</button>
+        </form>"#,
+        notice = notice,
+        steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
+        reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
+        reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
+        profile_dir_base = html_escape::encode_text(&settings.profile_dir_base),
+    );
+
+    render_layout("ARSSM Settings", "settings", &content)
+}
+
+fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+
+    let mut rows = String::new();
+    for profile in profiles {
+        rows.push_str(&format!(
+            r#"<tr>
+              <td><a href="/profiles/{id}">{name}</a></td>
+              <td>{url}</td>
+            </tr>"#,
+            id = html_escape::encode_text(&profile.profile_id),
+            name = html_escape::encode_text(&profile.display_name),
+            url = html_escape::encode_text(&profile.workshop_url),
+        ));
+    }
+
+    if rows.is_empty() {
+        rows.push_str("<tr><td colspan=\"2\">No profiles yet.</td></tr>");
+    }
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Profiles</h1>
+        {notice}
+        <form method="post" action="/profiles" class="card card-body mb-4">
+          <div class="mb-3">
+            <label class="form-label" for="display_name">Display name</label>
+            <input class="form-control" id="display_name" name="display_name">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="workshop_url">Workshop URL</label>
+            <input class="form-control" id="workshop_url" name="workshop_url">
+          </div>
+          <button class="btn btn-primary" type="submit">Create profile</button>
+        </form>
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th>Profile</th>
+              <th>Workshop URL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows}
+          </tbody>
+        </table>"#,
+        notice = notice,
+        rows = rows,
+    );
+
+    render_layout("ARSSM Profiles", "profiles", &content)
+}
+
+fn render_profile_detail(profile: &ServerProfile) -> String {
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Profile: {name}</h1>
+        <dl class="row">
+          <dt class="col-sm-3">Profile ID</dt>
+          <dd class="col-sm-9">{id}</dd>
+          <dt class="col-sm-3">Workshop URL</dt>
+          <dd class="col-sm-9">{url}</dd>
+          <dt class="col-sm-3">Selected scenario</dt>
+          <dd class="col-sm-9">{scenario}</dd>
+        </dl>
+        <a class="btn btn-outline-secondary" href="/profiles">Back to profiles</a>"#,
+        name = html_escape::encode_text(&profile.display_name),
+        id = html_escape::encode_text(&profile.profile_id),
+        url = html_escape::encode_text(&profile.workshop_url),
+        scenario = html_escape::encode_text(
+            profile
+                .selected_scenario_id_path
+                .as_deref()
+                .unwrap_or("Not selected")
+        ),
+    );
+
+    render_layout("ARSSM Profile", "profiles", &content)
+}
+
+fn render_layout(title: &str, active: &str, content: &str) -> String {
+    let nav_items = [
+        ("Dashboard", "/", "dashboard"),
+        ("Profiles", "/profiles", "profiles"),
+        ("Workshop Resolve", "/workshop", "workshop"),
+        ("Config Preview", "/config-preview", "config"),
+        ("Run & Logs", "/run-logs", "run"),
+        ("Settings", "/settings", "settings"),
+    ];
+
+    let mut nav_html = String::new();
+    for (label, href, key) in nav_items {
+        let class = if key == active { "nav-link active" } else { "nav-link" };
+        nav_html.push_str(&format!(
+            r#"<li class="nav-item"><a class="{class}" href="{href}">{label}</a></li>"#
+        ));
+    }
+
     format!(
         r#"<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ARSSM Settings</title>
+    <title>{title}</title>
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
@@ -212,47 +412,28 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
         <nav class="col-12 col-md-3 col-lg-2 bg-light border-end min-vh-100 p-3">
           <h2 class="h5">ARSSM</h2>
           <ul class="nav flex-column">
-            <li class="nav-item"><a class="nav-link" href="/">Dashboard</a></li>
-            <li class="nav-item"><a class="nav-link" href="/profiles">Profiles</a></li>
-            <li class="nav-item"><a class="nav-link" href="/workshop">Workshop Resolve</a></li>
-            <li class="nav-item"><a class="nav-link" href="/config-preview">Config Preview</a></li>
-            <li class="nav-item"><a class="nav-link" href="/run-logs">Run & Logs</a></li>
-            <li class="nav-item"><a class="nav-link active" href="/settings">Settings</a></li>
+            {nav_html}
           </ul>
         </nav>
         <main class="col-12 col-md-9 col-lg-10 p-4">
-          <h1 class="h3 mb-3">Settings</h1>
-          {notice}
-          <form method="post" action="/settings">
-            <div class="mb-3">
-              <label class="form-label" for="steamcmd_dir">SteamCMD directory</label>
-              <input class="form-control" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
-            </div>
-            <div class="mb-3">
-              <label class="form-label" for="reforger_server_exe">Reforger server executable</label>
-              <input class="form-control" id="reforger_server_exe" name="reforger_server_exe" value="{reforger_server_exe}">
-            </div>
-            <div class="mb-3">
-              <label class="form-label" for="reforger_server_work_dir">Reforger server work dir</label>
-              <input class="form-control" id="reforger_server_work_dir" name="reforger_server_work_dir" value="{reforger_server_work_dir}">
-            </div>
-            <div class="mb-3">
-              <label class="form-label" for="profile_dir_base">Profile base directory</label>
-              <input class="form-control" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
-            </div>
-            <button class="btn btn-primary" type="submit">Save</button>
-          </form>
+          {content}
         </main>
       </div>
     </div>
   </body>
 </html>"#,
-        notice = notice,
-        steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
-        reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
-        reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
-        profile_dir_base = html_escape::encode_text(&settings.profile_dir_base),
+        title = html_escape::encode_text(title),
+        nav_html = nav_html,
+        content = content,
     )
+}
+
+fn new_profile_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("profile-{nanos}")
 }
 
 fn config_path() -> PathBuf {

@@ -30,3 +30,7 @@ Request:
 
 `GET /health` returns plain `ok` for non-browser clients and provides a small HTML test UI
 when accessed via a browser (Accept: `text/html`).
+
+## Profiles
+
+Profiles are stored as JSON files under the app data `profiles/` directory.
