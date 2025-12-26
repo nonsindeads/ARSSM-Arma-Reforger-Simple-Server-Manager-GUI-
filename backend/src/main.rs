@@ -84,7 +84,7 @@ async fn main() {
         )
         .route(
             "/profiles/:profile_id/config-preview",
-            get(config_preview_page),
+            get(config_preview_page).post(config_preview_partial),
         )
         .route(
             "/profiles/:profile_id/config-write",
@@ -268,18 +268,9 @@ async fn profile_workshop_resolve(
         )));
     }
 
-    let result = state
-        .workshop_resolver
-        .resolve(&profile.workshop_url, 5)
+    let result = resolve_and_update_profile(&state, &mut profile)
         .await
         .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
-
-    profile.root_mod_id = Some(result.root_id.clone());
-    profile.dependency_mod_ids = result.dependency_ids.clone();
-    profile.last_resolved_at = Some(now_timestamp());
-    save_profile(&profile)
-        .await
-        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     Ok(Html(render_workshop_page(
         &profile,
@@ -338,6 +329,40 @@ async fn config_preview_page(
     };
 
     Ok(Html(render_config_preview(&profile, &preview, None)))
+}
+
+async fn config_preview_partial(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let result = resolve_and_update_profile(&state, &mut profile)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
+    if let Err(message) = validate_selected_scenario(&profile, &result.scenarios) {
+        return Ok(Html(render_config_preview_partial(
+            &format!("Error: {message}"),
+            Some("Resolve failed."),
+        )));
+    }
+
+    let preview = match generate_config_for_profile(&profile) {
+        Ok(value) => serde_json::to_string_pretty(&value)
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
+        Err(err) => err,
+    };
+
+    let notice = if result.errors.is_empty() {
+        Some("Resolved and regenerated.")
+    } else {
+        Some("Resolved with warnings; regenerated.")
+    };
+
+    Ok(Html(render_config_preview_partial(&preview, notice)))
 }
 
 async fn write_config(
@@ -792,6 +817,7 @@ fn render_workshop_page(
           <p class="mb-3"><strong>Workshop URL:</strong> {url}</p>
           <form method="post" action="/profiles/{id}/workshop/resolve">
             <button class="btn btn-primary" type="submit">Resolve</button>
+            <a class="btn btn-outline-secondary ms-2" href="/profiles/{id}/config-preview">Go to Config Preview</a>
           </form>
         </div>
 
@@ -808,7 +834,10 @@ fn render_workshop_page(
               <label class="form-label" for="optional_mod_ids">Optional mods (one ID per line)</label>
               <textarea class="form-control" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
             </div>
-            <button class="btn btn-success" type="submit">Save selection</button>
+            <div class="d-flex gap-2">
+              <button class="btn btn-success" type="submit">Save selection</button>
+              <a class="btn btn-outline-secondary" href="/profiles/{id}/config-preview">Config Preview</a>
+            </div>
           </form>
         </div>
 
@@ -840,32 +869,41 @@ fn render_workshop_page(
 }
 
 fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option<&str>) -> String {
-    let notice = message
-        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
-        .unwrap_or_default();
     let content = format!(
-        r#"<h1 class="h3 mb-3">Config Preview</h1>
+        r##"<h1 class="h3 mb-3">Config Preview</h1>
         <p class="text-muted">Profile: {name}</p>
-        {notice}
-        <pre class="bg-light p-3 border">{preview}</pre>
+        <div id="config-preview">
+          {preview_block}
+        </div>
         <div class="d-flex gap-2">
           <form method="post" action="/profiles/{id}/config-write">
             <button class="btn btn-primary" type="submit">Write file</button>
           </form>
+          <button class="btn btn-outline-secondary" hx-post="/profiles/{id}/config-preview" hx-target="#config-preview" hx-swap="innerHTML">Resolve & Regenerate</button>
           <form method="post" action="/profiles/{id}/config-regenerate">
-            <button class="btn btn-outline-secondary" type="submit">Regenerate</button>
+            <button class="btn btn-outline-secondary" type="submit">Regenerate (full)</button>
           </form>
         </div>
         <div class="mt-3">
           <a class="btn btn-outline-secondary" href="/profiles/{id}">Back to profile</a>
-        </div>"#,
+        </div>"##,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
-        preview = html_escape::encode_text(preview),
-        notice = notice,
+        preview_block = render_config_preview_partial(preview, message),
     );
 
     render_layout("ARSSM Config Preview", "config", &content)
+}
+
+fn render_config_preview_partial(preview: &str, message: Option<&str>) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+    format!(
+        r#"{notice}<pre class="bg-light p-3 border">{preview}</pre>"#,
+        notice = notice,
+        preview = html_escape::encode_text(preview),
+    )
 }
 
 fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
@@ -984,6 +1022,7 @@ fn render_layout(title: &str, active: &str, content: &str) -> String {
       integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
       crossorigin="anonymous"
     >
+    <script src="https://unpkg.com/htmx.org@1.9.12"></script>
   </head>
   <body>
     <div class="container-fluid">
