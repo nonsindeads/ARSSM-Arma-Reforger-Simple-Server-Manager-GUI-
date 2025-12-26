@@ -254,6 +254,7 @@ async fn profile_workshop_page(
 
 async fn profile_workshop_resolve(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(profile_id): Path<String>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let mut profile = load_profile(&profile_id)
@@ -272,11 +273,15 @@ async fn profile_workshop_resolve(
         .await
         .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
 
-    Ok(Html(render_workshop_page(
-        &profile,
-        Some(&result),
-        None,
-    )))
+    if is_hx_request(&headers) {
+        return Ok(Html(render_workshop_panel(
+            &profile,
+            Some(&result),
+            None,
+        )));
+    }
+
+    Ok(Html(render_workshop_page(&profile, Some(&result), None)))
 }
 
 #[derive(Deserialize)]
@@ -286,6 +291,7 @@ struct WorkshopSaveForm {
 }
 
 async fn profile_workshop_save(
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
     Form(form): Form<WorkshopSaveForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -308,9 +314,13 @@ async fn profile_workshop_save(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
+    let resolved = resolve_and_update_profile(&state, &mut profile)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
     Ok(Html(render_workshop_page(
         &profile,
-        None,
+        Some(&resolved),
         Some("Workshop selections saved."),
     )))
 }
@@ -757,6 +767,33 @@ fn render_workshop_page(
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
         .unwrap_or_default();
 
+    let content = format!(
+        r##"<h1 class="h3 mb-3">Workshop Resolve</h1>
+        {notice}
+        <div class="card card-body mb-4">
+          <p class="mb-1"><strong>Profile:</strong> {name}</p>
+          <p class="mb-3"><strong>Workshop URL:</strong> {url}</p>
+          <form method="post" action="/profiles/{id}/workshop/resolve" hx-post="/profiles/{id}/workshop/resolve" hx-target="#workshop-resolve-panel" hx-swap="outerHTML">
+            <button class="btn btn-primary" type="submit">Resolve</button>
+            <a class="btn btn-outline-secondary ms-2" href="/profiles/{id}/config-preview">Go to Config Preview</a>
+          </form>
+        </div>
+        {panel}"##,
+        notice = notice,
+        name = html_escape::encode_text(&profile.display_name),
+        url = html_escape::encode_text(&profile.workshop_url),
+        id = html_escape::encode_text(&profile.profile_id),
+        panel = render_workshop_panel(profile, resolved, None),
+    );
+
+    render_layout("ARSSM Workshop Resolve", "workshop", &content)
+}
+
+fn render_workshop_panel(
+    profile: &ServerProfile,
+    resolved: Option<&backend::workshop::WorkshopResolveResult>,
+    message: Option<&str>,
+) -> String {
     let (scenarios, dependency_ids, errors) = if let Some(result) = resolved {
         (result.scenarios.clone(), result.dependency_ids.clone(), result.errors.clone())
     } else {
@@ -786,6 +823,18 @@ fn render_workshop_page(
         }
     }
 
+    let invalid_selection = profile
+        .selected_scenario_id_path
+        .as_deref()
+        .map(|selected| !scenarios.is_empty() && !scenarios.iter().any(|value| value == selected))
+        .unwrap_or(false);
+
+    let selection_badge = if invalid_selection {
+        "<span class=\"badge text-bg-warning ms-2\">Selection outdated</span>"
+    } else {
+        ""
+    };
+
     let optional_mods = if profile.optional_mod_ids.is_empty() {
         String::new()
     } else {
@@ -809,20 +858,15 @@ fn render_workshop_page(
         error_list.push_str("<li>No errors.</li>");
     }
 
-    let content = format!(
-        r#"<h1 class="h3 mb-3">Workshop Resolve</h1>
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+
+    format!(
+        r#"<div id="workshop-resolve-panel">
         {notice}
         <div class="card card-body mb-4">
-          <p class="mb-1"><strong>Profile:</strong> {name}</p>
-          <p class="mb-3"><strong>Workshop URL:</strong> {url}</p>
-          <form method="post" action="/profiles/{id}/workshop/resolve">
-            <button class="btn btn-primary" type="submit">Resolve</button>
-            <a class="btn btn-outline-secondary ms-2" href="/profiles/{id}/config-preview">Go to Config Preview</a>
-          </form>
-        </div>
-
-        <div class="card card-body mb-4">
-          <h2 class="h5">Scenario Selection</h2>
+          <h2 class="h5">Scenario Selection {selection_badge}</h2>
           <form method="post" action="/profiles/{id}/workshop/save">
             <div class="mb-3">
               <label class="form-label" for="scenario">Scenario</label>
@@ -853,19 +897,17 @@ fn render_workshop_page(
         <div class="card card-body">
           <h2 class="h5">Resolve Errors</h2>
           <ul>{error_list}</ul>
+        </div>
         </div>"#,
         notice = notice,
-        name = html_escape::encode_text(&profile.display_name),
-        url = html_escape::encode_text(&profile.workshop_url),
+        selection_badge = selection_badge,
         id = html_escape::encode_text(&profile.profile_id),
         scenario_options = scenario_options,
         optional_mods = html_escape::encode_text(&optional_mods),
         dependency_count = dependency_count,
         dependency_list = dependency_list,
         error_list = error_list,
-    );
-
-    render_layout("ARSSM Workshop Resolve", "workshop", &content)
+    )
 }
 
 fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option<&str>) -> String {
@@ -1065,6 +1107,14 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+}
+
+fn is_hx_request(headers: &HeaderMap) -> bool {
+    headers
+        .get("HX-Request")
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value == "true")
+        .unwrap_or(false)
 }
 
 fn validate_selected_scenario(profile: &ServerProfile, scenarios: &[String]) -> Result<(), String> {
