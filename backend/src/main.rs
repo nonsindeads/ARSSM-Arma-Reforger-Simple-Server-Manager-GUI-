@@ -1,4 +1,5 @@
 use axum::{Json, Router, routing::get, extract::State, http::StatusCode};
+use backend::workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver};
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use std::{io, path::PathBuf};
@@ -21,6 +22,7 @@ struct AppConfig {
 #[derive(Clone)]
 struct AppState {
     config_path: PathBuf,
+    workshop_resolver: WorkshopResolver,
 }
 
 #[tokio::main]
@@ -33,10 +35,12 @@ async fn main() {
     let index_file = web_dir.join("index.html");
     let state = AppState {
         config_path: config_path(),
+        workshop_resolver: WorkshopResolver::new(std::sync::Arc::new(ReqwestFetcher::new())),
     };
 
     let app = Router::new()
         .route("/api/config", get(get_config).post(set_config))
+        .route("/api/workshop/resolve", axum::routing::post(resolve_workshop))
         .route("/health", get(health))
         .route_service("/", ServeFile::new(index_file))
         .nest_service("/web", ServeDir::new(web_dir))
@@ -88,6 +92,24 @@ async fn set_config(
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     Ok(Json(config))
+}
+
+async fn resolve_workshop(
+    State(state): State<AppState>,
+    Json(request): Json<WorkshopResolveRequest>,
+) -> Result<Json<backend::workshop::WorkshopResolveResult>, (StatusCode, String)> {
+    if request.url.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "url must not be empty".to_string()));
+    }
+
+    let max_depth = request.max_depth.unwrap_or(5);
+    let result = state
+        .workshop_resolver
+        .resolve(&request.url, max_depth)
+        .await
+        .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
+
+    Ok(Json(result))
 }
 
 impl AppConfig {
