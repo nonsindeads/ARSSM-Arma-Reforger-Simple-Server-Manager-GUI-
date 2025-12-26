@@ -2,8 +2,12 @@ use axum::{
     Form, Json, Router, extract::{Path, State}, http::{HeaderMap, StatusCode}, response::{Html, IntoResponse}, routing::get
 };
 use backend::{
+    config_gen::generate_server_config,
     models::ServerProfile,
-    storage::{AppSettings, load_profile, load_settings, list_profiles, save_profile, save_settings, settings_path},
+    storage::{
+        AppSettings, generated_config_path, load_profile, load_settings, list_profiles,
+        save_profile, save_settings, settings_path,
+    },
     workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver},
 };
 use serde::{Deserialize, Serialize};
@@ -56,6 +60,14 @@ async fn main() {
         .route("/api/settings", get(get_settings_api).post(save_settings_api))
         .route("/profiles", get(profiles_page).post(create_profile))
         .route("/profiles/:profile_id", get(profile_detail))
+        .route(
+            "/profiles/:profile_id/config-preview",
+            get(config_preview_page),
+        )
+        .route(
+            "/profiles/:profile_id/config-write",
+            axum::routing::post(write_config),
+        )
         .route("/settings", get(settings_page).post(settings_save))
         .route("/health", get(health))
         .route_service("/", ServeFile::new(index_file))
@@ -193,6 +205,56 @@ async fn profile_detail(
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
     Ok(Html(render_profile_detail(&profile)))
+}
+
+async fn config_preview_page(
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let preview = match generate_config_for_profile(&profile) {
+        Ok(value) => serde_json::to_string_pretty(&value)
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
+        Err(err) => err,
+    };
+
+    Ok(Html(render_config_preview(&profile, &preview, None)))
+}
+
+async fn write_config(
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let config = generate_config_for_profile(&profile)
+        .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+    let config_json = serde_json::to_string_pretty(&config)
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    let path = generated_config_path(&profile.profile_id);
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+    }
+    tokio::fs::write(&path, &config_json)
+        .await
+        .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
+
+    profile.generated_config_path = Some(path.to_string_lossy().to_string());
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_config_preview(
+        &profile,
+        &config_json,
+        Some("Config written successfully."),
+    )))
 }
 
 async fn settings_page(
@@ -359,6 +421,7 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
           <dt class="col-sm-3">Selected scenario</dt>
           <dd class="col-sm-9">{scenario}</dd>
         </dl>
+        <a class="btn btn-primary me-2" href="/profiles/{id}/config-preview">Config preview</a>
         <a class="btn btn-outline-secondary" href="/profiles">Back to profiles</a>"#,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
@@ -372,6 +435,31 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
     );
 
     render_layout("ARSSM Profile", "profiles", &content)
+}
+
+fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option<&str>) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Config Preview</h1>
+        <p class="text-muted">Profile: {name}</p>
+        {notice}
+        <pre class="bg-light p-3 border">{preview}</pre>
+        <form method="post" action="/profiles/{id}/config-write">
+          <button class="btn btn-primary" type="submit">Write file</button>
+          <a class="btn btn-outline-secondary ms-2" href="/profiles/{id}/config-preview">Regenerate</a>
+        </form>
+        <div class="mt-3">
+          <a class="btn btn-outline-secondary" href="/profiles/{id}">Back to profile</a>
+        </div>"#,
+        name = html_escape::encode_text(&profile.display_name),
+        id = html_escape::encode_text(&profile.profile_id),
+        preview = html_escape::encode_text(preview),
+        notice = notice,
+    );
+
+    render_layout("ARSSM Config Preview", "config", &content)
 }
 
 fn render_layout(title: &str, active: &str, content: &str) -> String {
@@ -434,6 +522,19 @@ fn new_profile_id() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     format!("profile-{nanos}")
+}
+
+fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Value, String> {
+    let scenario = profile
+        .selected_scenario_id_path
+        .as_deref()
+        .ok_or_else(|| "selected_scenario_id_path not set".to_string())?;
+
+    let mut mod_ids = Vec::new();
+    mod_ids.extend(profile.dependency_mod_ids.clone());
+    mod_ids.extend(profile.optional_mod_ids.clone());
+
+    generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
 }
 
 fn config_path() -> PathBuf {

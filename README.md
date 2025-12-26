@@ -34,3 +34,8 @@ when accessed via a browser (Accept: `text/html`).
 ## Profiles
 
 Profiles are stored as JSON files under the app data `profiles/` directory.
+
+## Config generation
+
+Baseline config: `backend/assets/server.sample.json`.
+Generated configs are written to `profiles/<profile_id>/generated/server.json`.

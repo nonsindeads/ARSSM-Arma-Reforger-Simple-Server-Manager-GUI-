@@ -51,6 +51,13 @@ pub fn profile_path(profile_id: &str) -> PathBuf {
     profiles_dir().join(format!("{profile_id}.json"))
 }
 
+pub fn generated_config_path(profile_id: &str) -> PathBuf {
+    profiles_dir()
+        .join(profile_id)
+        .join("generated")
+        .join("server.json")
+}
+
 pub async fn load_settings(path: &Path) -> Result<AppSettings, String> {
     match tokio::fs::read_to_string(path).await {
         Ok(contents) => serde_json::from_str(&contents)

@@ -1,0 +1,14 @@
+{
+  "bindAddress": "0.0.0.0",
+  "bindPort": 2001,
+  "publicAddress": "127.0.0.1",
+  "publicPort": 2001,
+  "game": {
+    "name": "Server Name",
+    "password": "",
+    "scenarioId": "{0000000000000000}Missions/Example.conf",
+    "maxPlayers": 64,
+    "visible": true,
+    "mods": []
+  }
+}
