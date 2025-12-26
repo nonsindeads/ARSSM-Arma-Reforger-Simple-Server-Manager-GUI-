@@ -8,6 +8,8 @@ pub struct AppSettings {
     pub reforger_server_exe: String,
     pub reforger_server_work_dir: String,
     pub profile_dir_base: String,
+    #[serde(default)]
+    pub active_profile_id: Option<String>,
 }
 
 impl AppSettings {

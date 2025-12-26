@@ -72,6 +72,7 @@ async fn main() {
         .route("/api/run/logs/stream", get(run_logs_stream))
         .route("/server", get(profiles_page).post(create_profile))
         .route("/server/:profile_id", get(profile_detail))
+        .route("/server/:profile_id/activate", axum::routing::post(activate_profile))
         .route(
             "/server/:profile_id/workshop",
             get(profile_workshop_page),
@@ -100,6 +101,7 @@ async fn main() {
         .route("/run-logs", get(run_logs_page))
         .route("/settings", get(settings_page).post(settings_save))
         .route("/partials/header-status", get(header_status_partial))
+        .route("/partials/server-status-card", get(server_status_card).post(server_status_action))
         .route("/health", get(health))
         .route("/", get(dashboard_page))
         .nest_service("/web", ServeDir::new(web_dir))
@@ -173,11 +175,16 @@ fn health_html() -> &'static str {
 "#
 }
 
-async fn profiles_page() -> Result<Html<String>, (StatusCode, String)> {
+async fn profiles_page(
+    State(state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
     let profiles = list_profiles()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    Ok(Html(render_profiles_page(&profiles, None)))
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_profiles_page(&profiles, settings.active_profile_id.as_deref(), None)))
 }
 
 #[derive(Deserialize)]
@@ -187,6 +194,7 @@ struct CreateProfileForm {
 }
 
 async fn create_profile(
+    State(state): State<AppState>,
     Form(form): Form<CreateProfileForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let display_name = form.display_name.trim().to_string();
@@ -196,8 +204,12 @@ async fn create_profile(
         let profiles = list_profiles()
             .await
             .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+        let settings = load_settings(&state.settings_path)
+            .await
+            .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
         return Ok(Html(render_profiles_page(
             &profiles,
+            settings.active_profile_id.as_deref(),
             Some("Display name and workshop URL are required."),
         )));
     }
@@ -223,20 +235,57 @@ async fn create_profile(
     let profiles = list_profiles()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     Ok(Html(render_profiles_page(
         &profiles,
+        settings.active_profile_id.as_deref(),
         Some("Profile created."),
     )))
 }
 
 async fn profile_detail(
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
-    Ok(Html(render_profile_detail(&profile)))
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_profile_detail(
+        &profile,
+        settings.active_profile_id.as_deref(),
+    )))
+}
+
+async fn activate_profile(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let _profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let mut settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    settings.active_profile_id = Some(profile_id);
+    save_settings(&state.settings_path, &settings)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_profiles_page(
+        &profiles,
+        settings.active_profile_id.as_deref(),
+        Some("Active profile updated."),
+    )))
 }
 
 async fn packages_page() -> Result<Html<String>, (StatusCode, String)> {
@@ -507,6 +556,66 @@ async fn header_status_partial(
     Ok(Html(html))
 }
 
+async fn server_status_card(
+    State(state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let status = state.run_manager.status().await;
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let active_name = active_profile_name(settings.active_profile_id.as_deref()).await;
+    Ok(Html(render_server_status_card(&status, active_name.as_deref(), None)))
+}
+
+#[derive(Deserialize)]
+struct ServerActionForm {
+    action: String,
+}
+
+async fn server_status_action(
+    State(state): State<AppState>,
+    Form(form): Form<ServerActionForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut message: Option<String> = None;
+    let action = form.action.trim();
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let active_id = settings.active_profile_id.clone();
+
+    match action {
+        "start" => {
+            if let Some(profile_id) = active_id.clone() {
+                if let Err(err) = start_profile(&state, &settings, &profile_id).await {
+                    message = Some(err);
+                }
+            } else {
+                message = Some("No active profile configured.".to_string());
+            }
+        }
+        "stop" => {
+            let _ = state.run_manager.stop().await;
+        }
+        "restart" => {
+            let _ = state.run_manager.stop().await;
+            if let Some(profile_id) = active_id.clone() {
+                if let Err(err) = start_profile(&state, &settings, &profile_id).await {
+                    message = Some(err);
+                }
+            } else {
+                message = Some("No active profile configured.".to_string());
+            }
+        }
+        _ => {
+            message = Some("Unknown action.".to_string());
+        }
+    }
+
+    let status = state.run_manager.status().await;
+    let active_name = active_profile_name(active_id.as_deref()).await;
+    Ok(Html(render_server_status_card(&status, active_name.as_deref(), message.as_deref())))
+}
+
 async fn dashboard_page(
     State(state): State<AppState>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -526,24 +635,21 @@ async fn dashboard_page(
     let content = format!(
         r#"<h1 class="h3 mb-3">Dashboard</h1>
         <div class="row g-3">
-          <div class="col-md-4">
+          <div class="col-lg-6">
+            <div id="server-status-card" hx-get="/partials/server-status-card" hx-trigger="load, every 5s" hx-swap="outerHTML"></div>
+          </div>
+          <div class="col-md-6 col-lg-3">
             <div class="card card-body">
-              <h2 class="h6">Profiles</h2>
+              <h2 class="h6 text-uppercase text-muted">Profile</h2>
               <p class="display-6 mb-0">{profile_count}</p>
+              <p class="small text-muted mb-0">Settings: {settings_status}</p>
             </div>
           </div>
-          <div class="col-md-4">
+          <div class="col-md-6 col-lg-3">
             <div class="card card-body">
-              <h2 class="h6">Settings</h2>
-              <p class="mb-0">{settings_status}</p>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="card card-body">
-              <h2 class="h6">Quick Links</h2>
-              <a href="/server" class="d-block">Server / Profile</a>
-              <a href="/workshop" class="d-block">Workshop Resolve</a>
-              <a href="/run-logs" class="d-block">Run & Logs</a>
+              <h2 class="h6 text-uppercase text-muted">Pakete</h2>
+              <p class="display-6 mb-0">0</p>
+              <p class="small text-muted mb-0">Optional Mods verfügbar</p>
             </div>
           </div>
         </div>"#,
@@ -571,11 +677,15 @@ async fn settings_save(
     State(state): State<AppState>,
     Form(form): Form<SettingsForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
+    let existing = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     let settings = AppSettings {
         steamcmd_dir: form.steamcmd_dir,
         reforger_server_exe: form.reforger_server_exe,
         reforger_server_work_dir: form.reforger_server_work_dir,
         profile_dir_base: form.profile_dir_base,
+        active_profile_id: existing.active_profile_id,
     };
 
     if let Err(message) = settings.validate() {
@@ -686,30 +796,48 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
     )
 }
 
-fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> String {
+fn render_profiles_page(
+    profiles: &[ServerProfile],
+    active_profile_id: Option<&str>,
+    message: Option<&str>,
+) -> String {
     let notice = message
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
         .unwrap_or_default();
 
     let mut rows = String::new();
     for profile in profiles {
+        let is_active = active_profile_id
+            .map(|value| value == profile.profile_id)
+            .unwrap_or(false);
+        let active_badge = if is_active {
+            "<span class=\"badge text-bg-success ms-2\">active</span>"
+        } else {
+            ""
+        };
         rows.push_str(&format!(
             r#"<tr>
-              <td><a href="/server/{id}">{name}</a></td>
+              <td><a href="/server/{id}">{name}</a> {active_badge}</td>
               <td>{url}</td>
+              <td>
+                <form method="post" action="/server/{id}/activate">
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">Set active</button>
+                </form>
+              </td>
             </tr>"#,
             id = html_escape::encode_text(&profile.profile_id),
             name = html_escape::encode_text(&profile.display_name),
             url = html_escape::encode_text(&profile.workshop_url),
+            active_badge = active_badge,
         ));
     }
 
     if rows.is_empty() {
-        rows.push_str("<tr><td colspan=\"2\">No profiles yet.</td></tr>");
+        rows.push_str("<tr><td colspan=\"3\">No profiles yet.</td></tr>");
     }
 
     let content = format!(
-        r#"<h1 class="h3 mb-3">Profiles</h1>
+        r#"<h1 class="h3 mb-3">Server / Profile</h1>
         {notice}
         <form method="post" action="/server" class="card card-body mb-4">
           <div class="mb-3">
@@ -727,6 +855,7 @@ fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> St
             <tr>
               <th>Profile</th>
               <th>Workshop URL</th>
+              <th>Active</th>
             </tr>
           </thead>
           <tbody>
@@ -745,7 +874,15 @@ fn render_profiles_page(profiles: &[ServerProfile], message: Option<&str>) -> St
     )
 }
 
-fn render_profile_detail(profile: &ServerProfile) -> String {
+fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str>) -> String {
+    let is_active = active_profile_id
+        .map(|value| value == profile.profile_id)
+        .unwrap_or(false);
+    let active_badge = if is_active {
+        "<span class=\"badge text-bg-success ms-2\">active</span>"
+    } else {
+        ""
+    };
     let content = format!(
         r#"<h1 class="h3 mb-3">Profile: {name}</h1>
         <dl class="row">
@@ -755,10 +892,15 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
           <dd class="col-sm-9">{url}</dd>
           <dt class="col-sm-3">Selected scenario</dt>
           <dd class="col-sm-9">{scenario}</dd>
+          <dt class="col-sm-3">Active</dt>
+          <dd class="col-sm-9">{active_badge}</dd>
         </dl>
         <a class="btn btn-outline-primary me-2" href="/server/{id}/workshop">Workshop resolve</a>
         <a class="btn btn-primary me-2" href="/server/{id}/config-preview">Config preview</a>
-        <a class="btn btn-outline-secondary" href="/server">Back to profiles</a>"#,
+        <form class="d-inline" method="post" action="/server/{id}/activate">
+          <button class="btn btn-outline-secondary" type="submit">Set active</button>
+        </form>
+        <a class="btn btn-outline-secondary ms-2" href="/server">Back to profiles</a>"#,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
         url = html_escape::encode_text(&profile.workshop_url),
@@ -768,6 +910,7 @@ fn render_profile_detail(profile: &ServerProfile) -> String {
                 .as_deref()
                 .unwrap_or("Not selected")
         ),
+        active_badge = active_badge,
     );
 
     render_layout(
@@ -1079,6 +1222,44 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
     )
 }
 
+fn render_server_status_card(
+    status: &RunStatus,
+    active_profile_name: Option<&str>,
+    message: Option<&str>,
+) -> String {
+    let run_state = if status.running { "running" } else { "stopped" };
+    let profile_name = active_profile_name.unwrap_or("none");
+    let notice = message
+        .map(|value| format!("<p class=\"text-warning mb-2\">{value}</p>"))
+        .unwrap_or_default();
+
+    format!(
+        r##"<div id="server-status-card" class="card card-body">
+          <h2 class="h6 text-uppercase text-muted">Server Status</h2>
+          {notice}
+          <p class="mb-1"><strong>Status:</strong> {run_state}</p>
+          <p class="mb-3"><strong>Aktives Profil:</strong> {profile_name}</p>
+          <div class="d-flex flex-wrap gap-2">
+            <form method="post" action="/partials/server-status-card" hx-post="/partials/server-status-card" hx-target="#server-status-card" hx-swap="outerHTML">
+              <input type="hidden" name="action" value="start">
+              <button class="btn btn-sm btn-success" type="submit">Start</button>
+            </form>
+            <form method="post" action="/partials/server-status-card" hx-post="/partials/server-status-card" hx-target="#server-status-card" hx-swap="outerHTML">
+              <input type="hidden" name="action" value="stop">
+              <button class="btn btn-sm btn-danger" type="submit">Stop</button>
+            </form>
+            <form method="post" action="/partials/server-status-card" hx-post="/partials/server-status-card" hx-target="#server-status-card" hx-swap="outerHTML">
+              <input type="hidden" name="action" value="restart">
+              <button class="btn btn-sm btn-outline-secondary" type="submit">Restart</button>
+            </form>
+          </div>
+        </div>"##,
+        notice = notice,
+        run_state = run_state,
+        profile_name = html_escape::encode_text(profile_name),
+    )
+}
+
 #[derive(Serialize)]
 struct NavItem {
     label: String,
@@ -1134,6 +1315,31 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+}
+
+async fn start_profile(
+    state: &AppState,
+    settings: &AppSettings,
+    profile_id: &str,
+) -> Result<(), String> {
+    let profile = load_profile(profile_id).await?;
+
+    let config_path = profile
+        .generated_config_path
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| generated_config_path(&profile.profile_id));
+
+    if tokio::fs::metadata(&config_path).await.is_err() {
+        return Err("generated config not found".to_string());
+    }
+
+    let profile_dir = PathBuf::from(&settings.profile_dir_base).join(&profile.profile_id);
+
+    state
+        .run_manager
+        .start(settings, &profile, &config_path, &profile_dir)
+        .await
 }
 
 fn template_env() -> &'static Environment<'static> {
@@ -1235,9 +1441,14 @@ fn format_duration(started_at: u64) -> String {
     format!("{hours}h {minutes}m {seconds}s")
 }
 
+async fn active_profile_name(profile_id: Option<&str>) -> Option<String> {
+    let profile_id = profile_id?;
+    load_profile(profile_id).await.ok().map(|profile| profile.display_name)
+}
+
 #[derive(Deserialize)]
 struct RunStartRequest {
-    profile_id: String,
+    profile_id: Option<String>,
 }
 
 async fn run_status(
@@ -1250,10 +1461,6 @@ async fn run_start(
     State(state): State<AppState>,
     Json(request): Json<RunStartRequest>,
 ) -> Result<Json<RunStatus>, (StatusCode, String)> {
-    if request.profile_id.trim().is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "profile_id must not be empty".to_string()));
-    }
-
     let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
@@ -1262,25 +1469,15 @@ async fn run_start(
         return Err((StatusCode::BAD_REQUEST, message));
     }
 
-    let profile = load_profile(&request.profile_id)
-        .await
-        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    let profile_id = match request.profile_id.clone().filter(|value| !value.trim().is_empty()) {
+        Some(value) => value,
+        None => settings
+            .active_profile_id
+            .clone()
+            .ok_or_else(|| (StatusCode::BAD_REQUEST, "active profile not set".to_string()))?,
+    };
 
-    let config_path = profile
-        .generated_config_path
-        .clone()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| generated_config_path(&profile.profile_id));
-
-    if tokio::fs::metadata(&config_path).await.is_err() {
-        return Err((StatusCode::BAD_REQUEST, "generated config not found".to_string()));
-    }
-
-    let profile_dir = PathBuf::from(&settings.profile_dir_base).join(&profile.profile_id);
-
-    state
-        .run_manager
-        .start(&settings, &profile, &config_path, &profile_dir)
+    start_profile(&state, &settings, &profile_id)
         .await
         .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
 
