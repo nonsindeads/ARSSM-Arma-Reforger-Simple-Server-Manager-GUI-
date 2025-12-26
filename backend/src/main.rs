@@ -14,7 +14,7 @@ use backend::{
 use serde::{Deserialize, Serialize};
 use tracing::info;
 use std::{io, path::PathBuf};
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::services::ServeDir;
 use axum::response::sse::{Event, Sse};
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -51,7 +51,6 @@ async fn main() {
         .init();
 
     let web_dir = web_dir();
-    let index_file = web_dir.join("index.html");
     let state = AppState {
         config_path: config_path(),
         workshop_resolver: WorkshopResolver::new(std::sync::Arc::new(ReqwestFetcher::new())),
@@ -99,7 +98,7 @@ async fn main() {
         .route("/settings", get(settings_page).post(settings_save))
         .route("/workshop", get(workshop_list_page))
         .route("/health", get(health))
-        .route_service("/", ServeFile::new(index_file))
+        .route("/", get(dashboard_page))
         .nest_service("/web", ServeDir::new(web_dir))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
@@ -434,6 +433,53 @@ async fn run_logs_page() -> Result<Html<String>, (StatusCode, String)> {
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     Ok(Html(render_run_logs_page(&profiles)))
+}
+
+async fn dashboard_page(
+    State(state): State<AppState>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    let settings_status = if settings.validate().is_ok() {
+        "Configured"
+    } else {
+        "Not configured"
+    };
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Dashboard</h1>
+        <div class="row g-3">
+          <div class="col-md-4">
+            <div class="card card-body">
+              <h2 class="h6">Profiles</h2>
+              <p class="display-6 mb-0">{profile_count}</p>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card card-body">
+              <h2 class="h6">Settings</h2>
+              <p class="mb-0">{settings_status}</p>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="card card-body">
+              <h2 class="h6">Quick Links</h2>
+              <a href="/profiles" class="d-block">Profiles</a>
+              <a href="/workshop" class="d-block">Workshop Resolve</a>
+              <a href="/run-logs" class="d-block">Run & Logs</a>
+            </div>
+          </div>
+        </div>"#,
+        profile_count = profiles.len(),
+        settings_status = settings_status,
+    );
+
+    Ok(Html(render_layout("ARSSM Dashboard", "dashboard", &content)))
 }
 
 #[derive(Deserialize)]
