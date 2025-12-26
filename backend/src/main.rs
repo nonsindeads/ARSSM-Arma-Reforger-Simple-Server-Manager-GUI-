@@ -4,6 +4,7 @@ use axum::{
 use backend::{
     config_gen::generate_server_config,
     models::ServerProfile,
+    runner::{RunManager, RunStatus},
     storage::{
         AppSettings, generated_config_path, load_profile, load_settings, list_profiles,
         save_profile, save_settings, settings_path,
@@ -14,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use tracing::info;
 use std::{io, path::PathBuf};
 use tower_http::services::{ServeDir, ServeFile};
+use axum::response::sse::{Event, Sse};
+use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
 async fn health(headers: HeaderMap) -> axum::response::Response {
     if wants_html(&headers) {
@@ -38,6 +41,7 @@ struct AppState {
     config_path: PathBuf,
     workshop_resolver: WorkshopResolver,
     settings_path: PathBuf,
+    run_manager: RunManager,
 }
 
 #[tokio::main]
@@ -52,12 +56,18 @@ async fn main() {
         config_path: config_path(),
         workshop_resolver: WorkshopResolver::new(std::sync::Arc::new(ReqwestFetcher::new())),
         settings_path: settings_path(),
+        run_manager: RunManager::new(),
     };
 
     let app = Router::new()
         .route("/api/config", get(get_config).post(set_config))
         .route("/api/workshop/resolve", axum::routing::post(resolve_workshop))
         .route("/api/settings", get(get_settings_api).post(save_settings_api))
+        .route("/api/run/status", get(run_status))
+        .route("/api/run/start", axum::routing::post(run_start))
+        .route("/api/run/stop", axum::routing::post(run_stop))
+        .route("/api/run/logs/tail", get(run_logs_tail))
+        .route("/api/run/logs/stream", get(run_logs_stream))
         .route("/profiles", get(profiles_page).post(create_profile))
         .route("/profiles/:profile_id", get(profile_detail))
         .route(
@@ -68,6 +78,7 @@ async fn main() {
             "/profiles/:profile_id/config-write",
             axum::routing::post(write_config),
         )
+        .route("/run-logs", get(run_logs_page))
         .route("/settings", get(settings_page).post(settings_save))
         .route("/health", get(health))
         .route_service("/", ServeFile::new(index_file))
@@ -179,6 +190,7 @@ async fn create_profile(
         selected_scenario_id_path: None,
         dependency_mod_ids: Vec::new(),
         optional_mod_ids: Vec::new(),
+        load_session_save: false,
         generated_config_path: None,
         last_resolved_at: None,
         last_resolve_hash: None,
@@ -264,6 +276,13 @@ async fn settings_page(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     Ok(Html(render_settings_page(&settings, None)))
+}
+
+async fn run_logs_page() -> Result<Html<String>, (StatusCode, String)> {
+    let profiles = list_profiles()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_run_logs_page(&profiles)))
 }
 
 #[derive(Deserialize)]
@@ -462,6 +481,91 @@ fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option
     render_layout("ARSSM Config Preview", "config", &content)
 }
 
+fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
+    let mut options = String::new();
+    for profile in profiles {
+        options.push_str(&format!(
+            r#"<option value="{id}">{name}</option>"#,
+            id = html_escape::encode_text(&profile.profile_id),
+            name = html_escape::encode_text(&profile.display_name),
+        ));
+    }
+
+    if options.is_empty() {
+        options.push_str("<option value=\"\">No profiles available</option>");
+    }
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Run & Logs</h1>
+        <div class="card card-body mb-3">
+          <div class="row g-3 align-items-end">
+            <div class="col-md-6">
+              <label class="form-label" for="profile-select">Profile</label>
+              <select class="form-select" id="profile-select">{options}</select>
+            </div>
+            <div class="col-md-6">
+              <div class="d-flex gap-2">
+                <button class="btn btn-success" id="start-btn">Start</button>
+                <button class="btn btn-danger" id="stop-btn">Stop</button>
+              </div>
+            </div>
+          </div>
+          <p class="mt-3 mb-0"><strong>Status:</strong> <span id="status-text">unknown</span></p>
+        </div>
+        <div class="card">
+          <div class="card-header">Live Log</div>
+          <div class="card-body">
+            <pre class="bg-light p-3 border" id="log-output" style="height: 360px; overflow-y: auto;"></pre>
+          </div>
+        </div>
+        <script>
+          const statusText = document.getElementById('status-text');
+          const logOutput = document.getElementById('log-output');
+          const profileSelect = document.getElementById('profile-select');
+
+          function appendLine(line) {{
+            logOutput.textContent += line + '\\n';
+            logOutput.scrollTop = logOutput.scrollHeight;
+          }}
+
+          async function refreshStatus() {{
+            const response = await fetch('/api/run/status');
+            const data = await response.json();
+            statusText.textContent = data.running ? ('running (pid ' + data.pid + ')') : 'stopped';
+          }}
+
+          document.getElementById('start-btn').addEventListener('click', async () => {{
+            const profile_id = profileSelect.value;
+            const response = await fetch('/api/run/start', {{
+              method: 'POST',
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ profile_id }})
+            }});
+            if (!response.ok) {{
+              const text = await response.text();
+              alert(text);
+            }}
+            refreshStatus();
+          }});
+
+          document.getElementById('stop-btn').addEventListener('click', async () => {{
+            await fetch('/api/run/stop', {{ method: 'POST' }});
+            refreshStatus();
+          }});
+
+          const eventSource = new EventSource('/api/run/logs/stream');
+          eventSource.onmessage = (event) => {{
+            appendLine(event.data);
+          }};
+
+          refreshStatus();
+        </script>"#,
+        options = options,
+    );
+
+    render_layout("ARSSM Run & Logs", "run", &content)
+}
+
 fn render_layout(title: &str, active: &str, content: &str) -> String {
     let nav_items = [
         ("Dashboard", "/", "dashboard"),
@@ -535,6 +639,96 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+}
+
+#[derive(Deserialize)]
+struct RunStartRequest {
+    profile_id: String,
+}
+
+async fn run_status(
+    State(state): State<AppState>,
+) -> Result<Json<RunStatus>, (StatusCode, String)> {
+    Ok(Json(state.run_manager.status().await))
+}
+
+async fn run_start(
+    State(state): State<AppState>,
+    Json(request): Json<RunStartRequest>,
+) -> Result<Json<RunStatus>, (StatusCode, String)> {
+    if request.profile_id.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "profile_id must not be empty".to_string()));
+    }
+
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    if let Err(message) = settings.validate() {
+        return Err((StatusCode::BAD_REQUEST, message));
+    }
+
+    let profile = load_profile(&request.profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    let config_path = profile
+        .generated_config_path
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| generated_config_path(&profile.profile_id));
+
+    if tokio::fs::metadata(&config_path).await.is_err() {
+        return Err((StatusCode::BAD_REQUEST, "generated config not found".to_string()));
+    }
+
+    let profile_dir = PathBuf::from(&settings.profile_dir_base).join(&profile.profile_id);
+
+    state
+        .run_manager
+        .start(&settings, &profile, &config_path, &profile_dir)
+        .await
+        .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+
+    Ok(Json(state.run_manager.status().await))
+}
+
+async fn run_stop(
+    State(state): State<AppState>,
+) -> Result<Json<RunStatus>, (StatusCode, String)> {
+    state
+        .run_manager
+        .stop()
+        .await
+        .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+    Ok(Json(state.run_manager.status().await))
+}
+
+#[derive(serde::Serialize)]
+struct LogTailResponse {
+    lines: Vec<String>,
+}
+
+async fn run_logs_tail(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<LogTailResponse>, (StatusCode, String)> {
+    let limit = params
+        .get("n")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(200);
+    let lines = state.run_manager.tail(limit).await;
+    Ok(Json(LogTailResponse { lines }))
+}
+
+async fn run_logs_stream(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let receiver = state.run_manager.subscribe();
+    let stream = BroadcastStream::new(receiver)
+        .filter_map(|message| message.ok())
+        .map(|line| Ok(Event::default().data(line)));
+    Sse::new(stream)
 }
 
 fn config_path() -> PathBuf {

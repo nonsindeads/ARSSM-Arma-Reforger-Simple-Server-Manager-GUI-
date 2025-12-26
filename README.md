@@ -39,3 +39,11 @@ Profiles are stored as JSON files under the app data `profiles/` directory.
 
 Baseline config: `backend/assets/server.sample.json`.
 Generated configs are written to `profiles/<profile_id>/generated/server.json`.
+
+## Run & Logs
+
+The backend exposes basic run endpoints and an SSE log stream:
+- `POST /api/run/start`
+- `POST /api/run/stop`
+- `GET /api/run/status`
+- `GET /api/run/logs/stream`
