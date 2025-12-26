@@ -1,4 +1,9 @@
-/target
+# Rust
+**/target/
+
+# Logs/Temp
 **/*.log
 **/*.tmp
+
+# OS
 .DS_Store
