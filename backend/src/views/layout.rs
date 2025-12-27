@@ -1,11 +1,14 @@
 use minijinja::{Environment, context};
+use serde::Serialize;
 use std::sync::OnceLock;
 
+#[derive(Serialize)]
 pub struct Breadcrumb {
     pub label: String,
     pub href: Option<String>,
 }
 
+#[derive(Serialize)]
 pub struct NavItem {
     pub label: String,
     pub href: String,
