@@ -29,3 +29,16 @@ pub struct ModPreset {
     pub name: String,
     pub mod_ids: Vec<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModEntry {
+    pub mod_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModPackage {
+    pub package_id: String,
+    pub name: String,
+    pub mod_ids: Vec<String>,
+}

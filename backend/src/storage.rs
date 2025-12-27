@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use crate::models::ServerProfile;
+use crate::models::{ModEntry, ModPackage, ServerProfile};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AppSettings {
@@ -10,6 +10,16 @@ pub struct AppSettings {
     pub profile_dir_base: String,
     #[serde(default)]
     pub active_profile_id: Option<String>,
+    #[serde(default)]
+    pub server_path: String,
+    #[serde(default)]
+    pub workshop_path: String,
+    #[serde(default)]
+    pub mod_path: String,
+    #[serde(default)]
+    pub server_json_defaults: serde_json::Value,
+    #[serde(default)]
+    pub server_json_enabled: std::collections::HashMap<String, bool>,
 }
 
 impl AppSettings {
@@ -58,6 +68,14 @@ pub fn generated_config_path(profile_id: &str) -> PathBuf {
         .join(profile_id)
         .join("generated")
         .join("server.json")
+}
+
+pub fn mods_path() -> PathBuf {
+    base_dir().join("mods.json")
+}
+
+pub fn packages_path() -> PathBuf {
+    base_dir().join("packages.json")
 }
 
 pub async fn load_settings(path: &Path) -> Result<AppSettings, String> {
@@ -182,6 +200,72 @@ pub async fn delete_profile(profile_id: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+pub async fn load_mods() -> Result<Vec<ModEntry>, String> {
+    let path = mods_path();
+    match tokio::fs::read_to_string(&path).await {
+        Ok(contents) => serde_json::from_str(&contents)
+            .map_err(|err| format!("failed to parse mods: {err}")),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(format!("failed to read mods: {err}")),
+    }
+}
+
+pub async fn save_mods(mods: &[ModEntry]) -> Result<(), String> {
+    let path = mods_path();
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| format!("failed to create mods dir: {err}"))?;
+    }
+    let data = serde_json::to_string_pretty(mods)
+        .map_err(|err| format!("failed to serialize mods: {err}"))?;
+    let tmp_path = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp_path, data)
+        .await
+        .map_err(|err| format!("failed to write temp mods: {err}"))?;
+    if tokio::fs::metadata(&path).await.is_ok() {
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|err| format!("failed to remove old mods: {err}"))?;
+    }
+    tokio::fs::rename(&tmp_path, &path)
+        .await
+        .map_err(|err| format!("failed to move mods into place: {err}"))
+}
+
+pub async fn load_packages() -> Result<Vec<ModPackage>, String> {
+    let path = packages_path();
+    match tokio::fs::read_to_string(&path).await {
+        Ok(contents) => serde_json::from_str(&contents)
+            .map_err(|err| format!("failed to parse packages: {err}")),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(err) => Err(format!("failed to read packages: {err}")),
+    }
+}
+
+pub async fn save_packages(packages: &[ModPackage]) -> Result<(), String> {
+    let path = packages_path();
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| format!("failed to create packages dir: {err}"))?;
+    }
+    let data = serde_json::to_string_pretty(packages)
+        .map_err(|err| format!("failed to serialize packages: {err}"))?;
+    let tmp_path = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp_path, data)
+        .await
+        .map_err(|err| format!("failed to write temp packages: {err}"))?;
+    if tokio::fs::metadata(&path).await.is_ok() {
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|err| format!("failed to remove old packages: {err}"))?;
+    }
+    tokio::fs::rename(&tmp_path, &path)
+        .await
+        .map_err(|err| format!("failed to move packages into place: {err}"))
 }
 
 #[cfg(test)]

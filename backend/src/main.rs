@@ -6,8 +6,9 @@ use backend::{
     models::ServerProfile,
     runner::{RunManager, RunStatus},
     storage::{
-        AppSettings, delete_profile, generated_config_path, load_profile, load_settings,
-        list_profiles, save_profile, save_settings, settings_path,
+        AppSettings, delete_profile, generated_config_path, load_mods, load_packages, load_profile,
+        load_settings, list_profiles, save_mods, save_packages, save_profile, save_settings,
+        settings_path,
     },
     workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver},
 };
@@ -103,8 +104,15 @@ async fn main() {
             axum::routing::post(regenerate_config),
         )
         .route("/packages", get(packages_page))
+        .route("/packages/mods/add", axum::routing::post(add_mod))
+        .route("/packages/mods/:mod_id/edit", axum::routing::post(edit_mod))
+        .route("/packages/mods/:mod_id/delete", axum::routing::post(delete_mod))
+        .route("/packages/packs/add", axum::routing::post(add_package))
+        .route("/packages/packs/:package_id/edit", axum::routing::post(edit_package))
+        .route("/packages/packs/:package_id/delete", axum::routing::post(delete_package))
         .route("/run-logs", get(run_logs_page))
         .route("/settings", get(settings_page).post(settings_save))
+        .route("/settings/defaults", axum::routing::post(settings_defaults_save))
         .route("/partials/header-status", get(header_status_partial))
         .route("/partials/server-status-card", get(server_status_card).post(server_status_action))
         .route("/health", get(health))
@@ -389,12 +397,242 @@ async fn activate_profile(
 }
 
 async fn packages_page() -> Result<Html<String>, (StatusCode, String)> {
-    let content = "<h1 class=\"h3 mb-3\">Pakete / Mods</h1><p class=\"text-muted\">Noch keine Pakete definiert.</p>".to_string();
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let content = render_packages_page(&mods, &packages, None);
     Ok(Html(render_layout(
         "ARSSM Pakete",
         "packages",
         vec![breadcrumb("Pakete / Mods", None)],
         &content,
+    )))
+}
+
+#[derive(Deserialize)]
+struct ModForm {
+    mod_id: String,
+    name: String,
+}
+
+async fn add_mod(
+    Form(form): Form<ModForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    if form.mod_id.trim().is_empty() || form.name.trim().is_empty() {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Mod ID and name are required."),
+        )));
+    }
+
+    let mod_id = parse_mod_id_input(&form.mod_id)
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid mod ID".to_string()))?;
+    if mods.iter().any(|entry| entry.mod_id == mod_id) {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Mod ID already exists."),
+        )));
+    }
+
+    mods.push(backend::models::ModEntry {
+        mod_id,
+        name: form.name.trim().to_string(),
+    });
+    save_mods(&mods)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_packages_page(&mods, &packages, Some("Mod added."))))
+}
+
+async fn edit_mod(
+    Path(mod_id): Path<String>,
+    Form(form): Form<ModForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    if form.name.trim().is_empty() {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Mod name is required."),
+        )));
+    }
+
+    let updated = mods.iter_mut().any(|entry| {
+        if entry.mod_id == mod_id {
+            entry.name = form.name.trim().to_string();
+            true
+        } else {
+            false
+        }
+    });
+
+    if !updated {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Mod not found."),
+        )));
+    }
+
+    save_mods(&mods)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_packages_page(&mods, &packages, Some("Mod updated."))))
+}
+
+async fn delete_mod(
+    Path(mod_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    if packages.iter().any(|package| package.mod_ids.iter().any(|id| id == &mod_id)) {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Mod is used in a package and cannot be deleted."),
+        )));
+    }
+
+    mods.retain(|entry| entry.mod_id != mod_id);
+    save_mods(&mods)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_packages_page(&mods, &packages, Some("Mod deleted."))))
+}
+
+#[derive(Deserialize)]
+struct PackageForm {
+    name: String,
+    mod_ids: Option<Vec<String>>,
+}
+
+async fn add_package(
+    Form(form): Form<PackageForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let mut packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    if form.name.trim().is_empty() {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Package name is required."),
+        )));
+    }
+
+    let package = backend::models::ModPackage {
+        package_id: new_package_id(),
+        name: form.name.trim().to_string(),
+        mod_ids: form.mod_ids.unwrap_or_default(),
+    };
+    packages.push(package);
+    save_packages(&packages)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_packages_page(
+        &mods,
+        &packages,
+        Some("Package created."),
+    )))
+}
+
+async fn edit_package(
+    Path(package_id): Path<String>,
+    Form(form): Form<PackageForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let mut packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    if form.name.trim().is_empty() {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Package name is required."),
+        )));
+    }
+
+    let updated = packages.iter_mut().any(|entry| {
+        if entry.package_id == package_id {
+            entry.name = form.name.trim().to_string();
+            entry.mod_ids = form.mod_ids.clone().unwrap_or_default();
+            true
+        } else {
+            false
+        }
+    });
+
+    if !updated {
+        return Ok(Html(render_packages_page(
+            &mods,
+            &packages,
+            Some("Package not found."),
+        )));
+    }
+
+    save_packages(&packages)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_packages_page(
+        &mods,
+        &packages,
+        Some("Package updated."),
+    )))
+}
+
+async fn delete_package(
+    Path(package_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let mut packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    packages.retain(|entry| entry.package_id != package_id);
+    save_packages(&packages)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_packages_page(
+        &mods,
+        &packages,
+        Some("Package deleted."),
     )))
 }
 
@@ -609,13 +847,24 @@ async fn regenerate_config(
     Ok(Html(render_config_preview(&profile, &preview, notice)))
 }
 
+#[derive(Deserialize)]
+struct SettingsQuery {
+    tab: Option<String>,
+}
+
 async fn settings_page(
     State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<SettingsQuery>,
 ) -> Result<Html<String>, (StatusCode, String)> {
-    let settings = load_settings(&state.settings_path)
+    let mut settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    Ok(Html(render_settings_page(&settings, None)))
+    apply_default_server_json(&mut settings);
+    Ok(Html(render_settings_page(
+        &settings,
+        query.tab.as_deref(),
+        None,
+    )))
 }
 
 async fn run_logs_page() -> Result<Html<String>, (StatusCode, String)> {
@@ -722,6 +971,9 @@ async fn dashboard_page(
     let profiles = list_profiles()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
@@ -748,13 +1000,14 @@ async fn dashboard_page(
           <div class="col-md-6 col-lg-3">
             <div class="card card-body">
               <h2 class="h6 text-uppercase text-muted">Pakete</h2>
-              <p class="display-6 mb-0">0</p>
+              <p class="display-6 mb-0">{package_count}</p>
               <p class="small text-muted mb-0">Optional Mods verfügbar</p>
             </div>
           </div>
         </div>"#,
         profile_count = profiles.len(),
         settings_status = settings_status,
+        package_count = packages.len(),
     );
 
     Ok(Html(render_layout(
@@ -771,6 +1024,9 @@ struct SettingsForm {
     reforger_server_exe: String,
     reforger_server_work_dir: String,
     profile_dir_base: String,
+    server_path: String,
+    workshop_path: String,
+    mod_path: String,
 }
 
 async fn settings_save(
@@ -780,23 +1036,71 @@ async fn settings_save(
     let existing = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let settings = AppSettings {
+    let mut settings = AppSettings {
         steamcmd_dir: form.steamcmd_dir,
         reforger_server_exe: form.reforger_server_exe,
         reforger_server_work_dir: form.reforger_server_work_dir,
         profile_dir_base: form.profile_dir_base,
         active_profile_id: existing.active_profile_id,
+        server_path: form.server_path,
+        workshop_path: form.workshop_path,
+        mod_path: form.mod_path,
+        server_json_defaults: existing.server_json_defaults,
+        server_json_enabled: existing.server_json_enabled,
     };
 
+    apply_default_server_json(&mut settings);
+
     if let Err(message) = settings.validate() {
-        return Ok(Html(render_settings_page(&settings, Some(&message))));
+        return Ok(Html(render_settings_page(
+            &settings,
+            Some("paths"),
+            Some(&message),
+        )));
     }
 
     save_settings(&state.settings_path, &settings)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_settings_page(&settings, Some("Settings saved."))))
+    Ok(Html(render_settings_page(
+        &settings,
+        Some("paths"),
+        Some("Settings saved."),
+    )))
+}
+
+async fn settings_defaults_save(
+    State(state): State<AppState>,
+    Form(form): Form<std::collections::HashMap<String, String>>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    apply_default_server_json(&mut settings);
+
+    let (defaults, enabled) = match parse_defaults_form(&form, &settings.server_json_defaults) {
+        Ok(result) => result,
+        Err(err) => {
+            return Ok(Html(render_settings_page(
+                &settings,
+                Some("defaults"),
+                Some(&err),
+            )))
+        }
+    };
+    settings.server_json_defaults = defaults;
+    settings.server_json_enabled = enabled;
+
+    save_settings(&state.settings_path, &settings)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_settings_page(
+        &settings,
+        Some("defaults"),
+        Some("Defaults saved."),
+    )))
 }
 
 async fn get_settings_api(
@@ -836,14 +1140,37 @@ async fn steamcmd_update() -> Json<SteamcmdUpdateResponse> {
     })
 }
 
-fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String {
+fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Option<&str>) -> String {
     let notice = message
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
         .unwrap_or_default();
-    let content = format!(
-        r#"<h1 class="h3 mb-3">Settings</h1>
-        {notice}
-        <form method="post" action="/settings">
+    let active_tab = tab.unwrap_or("paths");
+    let tabs = format!(
+        r#"<ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><a class="nav-link {paths_active}" href="/settings?tab=paths">Pfade</a></li>
+          <li class="nav-item"><a class="nav-link {defaults_active}" href="/settings?tab=defaults">server.json Defaults</a></li>
+        </ul>"#,
+        paths_active = if active_tab == "paths" { "active" } else { "" },
+        defaults_active = if active_tab == "defaults" { "active" } else { "" },
+    );
+
+    let paths_content = format!(
+        r#"<form method="post" action="/settings">
+          <h2 class="h5">Pfade</h2>
+          <div class="mb-3">
+            <label class="form-label" for="server_path">Server-Pfad</label>
+            <input class="form-control" id="server_path" name="server_path" value="{server_path}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="workshop_path">Workshop-Pfad</label>
+            <input class="form-control" id="workshop_path" name="workshop_path" value="{workshop_path}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="mod_path">Mod-Pfad</label>
+            <input class="form-control" id="mod_path" name="mod_path" value="{mod_path}">
+          </div>
+          <hr>
+          <h2 class="h6 text-uppercase text-muted">Runtime Paths</h2>
           <div class="mb-3">
             <label class="form-label" for="steamcmd_dir">SteamCMD directory</label>
             <input class="form-control" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
@@ -861,16 +1188,7 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
             <input class="form-control" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
           </div>
           <button class="btn btn-primary" type="submit">Save</button>
-        </form>"#,
-        notice = notice,
-        steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
-        reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
-        reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
-        profile_dir_base = html_escape::encode_text(&settings.profile_dir_base),
-    );
-
-    let content = format!(
-        r#"{content}
+        </form>
         <hr>
         <h2 class="h5">SteamCMD Update</h2>
         <p class="text-muted">Placeholder action for MVP2.</p>
@@ -885,7 +1203,29 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
             status.textContent = data.message;
           }});
         </script>"#,
-        content = content
+        server_path = html_escape::encode_text(&settings.server_path),
+        workshop_path = html_escape::encode_text(&settings.workshop_path),
+        mod_path = html_escape::encode_text(&settings.mod_path),
+        steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
+        reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
+        reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
+        profile_dir_base = html_escape::encode_text(&settings.profile_dir_base),
+    );
+
+    let defaults_content = render_defaults_form(settings);
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Settings</h1>
+        {notice}
+        {tabs}
+        {tab_content}"#,
+        notice = notice,
+        tabs = tabs,
+        tab_content = if active_tab == "defaults" {
+            defaults_content
+        } else {
+            paths_content
+        },
     );
 
     render_layout(
@@ -893,6 +1233,63 @@ fn render_settings_page(settings: &AppSettings, message: Option<&str>) -> String
         "settings",
         vec![breadcrumb("Settings", None)],
         &content,
+    )
+}
+
+#[derive(Debug)]
+struct DefaultField {
+    path: String,
+    kind: String,
+    value: String,
+}
+
+fn render_defaults_form(settings: &AppSettings) -> String {
+    let fields = flatten_defaults(&settings.server_json_defaults);
+    let mut rows = String::new();
+    for field in fields {
+        let enabled = settings
+            .server_json_enabled
+            .get(&field.path)
+            .copied()
+            .unwrap_or(true);
+        let checked = if enabled { "checked" } else { "" };
+        rows.push_str(&format!(
+            r#"<tr>
+              <td><input type="checkbox" name="default_enabled.{path}" {checked}></td>
+              <td><code>{path}</code></td>
+              <td>
+                <input type="hidden" name="default_type.{path}" value="{kind}">
+                <input class="form-control form-control-sm" name="default_value.{path}" value="{value}">
+              </td>
+            </tr>"#,
+            path = html_escape::encode_text(&field.path),
+            kind = html_escape::encode_text(&field.kind),
+            value = html_escape::encode_text(&field.value),
+            checked = checked,
+        ));
+    }
+
+    format!(
+        r#"<form method="post" action="/settings/defaults">
+          <h2 class="h5">server.json Defaults</h2>
+          <p class="text-muted">Aktive Optionen werden bei neuen Profilen genutzt.</p>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Active</th>
+                  <th>Option</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows}
+              </tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" type="submit">Save defaults</button>
+        </form>"#,
+        rows = rows,
     )
 }
 
@@ -1481,6 +1878,143 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
     )
 }
 
+fn render_packages_page(
+    mods: &[backend::models::ModEntry],
+    packages: &[backend::models::ModPackage],
+    message: Option<&str>,
+) -> String {
+    let notice = message
+        .map(|value| format!("<p class=\"text-success\">{value}</p>"))
+        .unwrap_or_default();
+
+    let mut mod_rows = String::new();
+    for entry in mods {
+        mod_rows.push_str(&format!(
+            r#"<tr>
+              <td>{mod_id}</td>
+              <td>{name}</td>
+              <td class="d-flex gap-2">
+                <form method="post" action="/packages/mods/{mod_id}/edit" class="d-flex gap-2">
+                  <input type="hidden" name="mod_id" value="{mod_id}">
+                  <input class="form-control form-control-sm" name="name" value="{name}">
+                  <button class="btn btn-sm btn-outline-secondary" type="submit">Save</button>
+                </form>
+                <form method="post" action="/packages/mods/{mod_id}/delete">
+                  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>"#,
+            mod_id = html_escape::encode_text(&entry.mod_id),
+            name = html_escape::encode_text(&entry.name),
+        ));
+    }
+    if mod_rows.is_empty() {
+        mod_rows.push_str("<tr><td colspan=\"3\">No mods defined.</td></tr>");
+    }
+
+    let mut package_rows = String::new();
+    for package in packages {
+        let mod_list = if package.mod_ids.is_empty() {
+            "None".to_string()
+        } else {
+            package.mod_ids.join(", ")
+        };
+        package_rows.push_str(&format!(
+            r#"<tr>
+              <td>{name}</td>
+              <td>{mods}</td>
+              <td class="d-flex gap-2">
+                <form method="post" action="/packages/packs/{id}/edit">
+                  <input type="hidden" name="package_id" value="{id}">
+                  <input class="form-control form-control-sm mb-2" name="name" value="{name}">
+                  <select class="form-select form-select-sm" name="mod_ids" multiple>
+                    {options}
+                  </select>
+                  <button class="btn btn-sm btn-outline-secondary mt-2" type="submit">Save</button>
+                </form>
+                <form method="post" action="/packages/packs/{id}/delete">
+                  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>"#,
+            id = html_escape::encode_text(&package.package_id),
+            name = html_escape::encode_text(&package.name),
+            mods = html_escape::encode_text(&mod_list),
+            options = render_mod_options(mods, Some(&package.mod_ids)),
+        ));
+    }
+    if package_rows.is_empty() {
+        package_rows.push_str("<tr><td colspan=\"3\">No packages defined.</td></tr>");
+    }
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Pakete / Mods</h1>
+        {notice}
+        <div class="row g-3">
+          <div class="col-lg-6">
+            <div class="card card-body mb-3">
+              <h2 class="h6 text-uppercase text-muted">Mods</h2>
+              <form method="post" action="/packages/mods/add" class="row g-2 mb-3">
+                <div class="col-md-5">
+                  <input class="form-control" name="mod_id" placeholder="Mod ID or URL">
+                </div>
+                <div class="col-md-5">
+                  <input class="form-control" name="name" placeholder="Name">
+                </div>
+                <div class="col-md-2 d-grid">
+                  <button class="btn btn-primary" type="submit">Add</button>
+                </div>
+              </form>
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Mod ID</th>
+                    <th>Name</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mod_rows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="col-lg-6">
+            <div class="card card-body mb-3">
+              <h2 class="h6 text-uppercase text-muted">Pakete</h2>
+              <form method="post" action="/packages/packs/add" class="mb-3">
+                <div class="mb-2">
+                  <input class="form-control" name="name" placeholder="Package name">
+                </div>
+                <select class="form-select" name="mod_ids" multiple>
+                  {package_options}
+                </select>
+                <button class="btn btn-primary mt-2" type="submit">Create</button>
+              </form>
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Package</th>
+                    <th>Mods</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {package_rows}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>"#,
+        notice = notice,
+        mod_rows = mod_rows,
+        package_rows = package_rows,
+        package_options = render_mod_options(mods, None),
+    );
+
+    content
+}
+
 fn render_server_status_card(
     status: &RunStatus,
     active_profile_name: Option<&str>,
@@ -1561,6 +2095,14 @@ fn new_profile_id() -> String {
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
     format!("profile-{nanos}")
+}
+
+fn new_package_id() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("package-{nanos}")
 }
 
 fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Value, String> {
@@ -1663,6 +2205,37 @@ async fn resolve_and_update_profile(
     Ok(result)
 }
 
+fn render_mod_options(mods: &[backend::models::ModEntry], selected: Option<&[String]>) -> String {
+    let mut options = String::new();
+    for entry in mods {
+        let is_selected = selected
+            .map(|list| list.iter().any(|id| id == &entry.mod_id))
+            .unwrap_or(false);
+        let selected_attr = if is_selected { "selected" } else { "" };
+        options.push_str(&format!(
+            r#"<option value="{id}" {selected}>{name} ({id})</option>"#,
+            id = html_escape::encode_text(&entry.mod_id),
+            name = html_escape::encode_text(&entry.name),
+            selected = selected_attr,
+        ));
+    }
+    if options.is_empty() {
+        options.push_str("<option value=\"\">No mods available</option>");
+    }
+    options
+}
+
+fn parse_mod_id_input(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.contains("/workshop/") {
+        return backend::workshop::extract_workshop_id_from_url(trimmed);
+    }
+    if trimmed.len() == 16 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
 fn parse_mod_ids(input: &str) -> Vec<String> {
     input
         .lines()
@@ -1698,6 +2271,132 @@ fn format_duration(started_at: u64) -> String {
     let minutes = (total % 3600) / 60;
     let seconds = total % 60;
     format!("{hours}h {minutes}m {seconds}s")
+}
+
+fn apply_default_server_json(settings: &mut AppSettings) {
+    if !settings.server_json_defaults.is_object() {
+        if let Ok(value) = serde_json::from_str(backend::config_gen::baseline_config()) {
+            settings.server_json_defaults = value;
+        }
+    }
+}
+
+fn flatten_defaults(value: &serde_json::Value) -> Vec<DefaultField> {
+    let mut fields = Vec::new();
+    flatten_value(value, "", &mut fields);
+    fields
+}
+
+fn flatten_value(value: &serde_json::Value, prefix: &str, out: &mut Vec<DefaultField>) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (key, val) in map {
+                let path = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                flatten_value(val, &path, out);
+            }
+        }
+        serde_json::Value::Array(list) => {
+            let value_string = serde_json::to_string(list).unwrap_or_default();
+            out.push(DefaultField {
+                path: prefix.to_string(),
+                kind: "array".to_string(),
+                value: value_string,
+            });
+        }
+        serde_json::Value::String(text) => out.push(DefaultField {
+            path: prefix.to_string(),
+            kind: "string".to_string(),
+            value: text.clone(),
+        }),
+        serde_json::Value::Number(num) => out.push(DefaultField {
+            path: prefix.to_string(),
+            kind: "number".to_string(),
+            value: num.to_string(),
+        }),
+        serde_json::Value::Bool(value) => out.push(DefaultField {
+            path: prefix.to_string(),
+            kind: "bool".to_string(),
+            value: value.to_string(),
+        }),
+        serde_json::Value::Null => out.push(DefaultField {
+            path: prefix.to_string(),
+            kind: "null".to_string(),
+            value: "".to_string(),
+        }),
+    }
+}
+
+fn parse_defaults_form(
+    form: &std::collections::HashMap<String, String>,
+    baseline: &serde_json::Value,
+) -> Result<(serde_json::Value, std::collections::HashMap<String, bool>), String> {
+    let mut updated = baseline.clone();
+    let mut enabled = std::collections::HashMap::new();
+
+    for (key, _value) in form {
+        if let Some(path) = key.strip_prefix("default_enabled.") {
+            enabled.insert(path.to_string(), true);
+        }
+    }
+
+    for (key, value) in form {
+        if let Some(path) = key.strip_prefix("default_value.") {
+            let type_key = format!("default_type.{path}");
+            let kind = form.get(&type_key).map(String::as_str).unwrap_or("string");
+            let parsed = parse_value_by_kind(kind, value)?;
+            set_json_path(&mut updated, path, parsed)?;
+        }
+    }
+
+    Ok((updated, enabled))
+}
+
+fn parse_value_by_kind(kind: &str, value: &str) -> Result<serde_json::Value, String> {
+    match kind {
+        "string" => Ok(serde_json::Value::String(value.to_string())),
+        "number" => value
+            .parse::<f64>()
+            .map(serde_json::Value::from)
+            .map_err(|_| format!("invalid number for {value}")),
+        "bool" => match value.trim() {
+            "true" => Ok(serde_json::Value::Bool(true)),
+            "false" => Ok(serde_json::Value::Bool(false)),
+            _ => Err(format!("invalid bool for {value}")),
+        },
+        "array" => serde_json::from_str(value)
+            .map_err(|err| format!("invalid array json: {err}")),
+        "null" => Ok(serde_json::Value::Null),
+        _ => Ok(serde_json::Value::String(value.to_string())),
+    }
+}
+
+fn set_json_path(
+    target: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let mut current = target;
+    for (idx, part) in parts.iter().enumerate() {
+        let is_last = idx == parts.len() - 1;
+        if is_last {
+            if let Some(obj) = current.as_object_mut() {
+                obj.insert(part.to_string(), value);
+                return Ok(());
+            } else {
+                return Err(format!("invalid path: {path}"));
+            }
+        } else {
+            current = current
+                .get_mut(*part)
+                .ok_or_else(|| format!("missing path segment: {part}"))?;
+        }
+    }
+    Ok(())
 }
 
 async fn active_profile_name(profile_id: Option<&str>) -> Option<String> {
