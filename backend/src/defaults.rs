@@ -133,10 +133,7 @@ pub fn parse_defaults_form(
 pub fn parse_value_by_kind(kind: &str, value: &str) -> Result<serde_json::Value, String> {
     match kind {
         "string" => Ok(serde_json::Value::String(value.to_string())),
-        "number" => value
-            .parse::<f64>()
-            .map(serde_json::Value::from)
-            .map_err(|_| format!("invalid number for {value}")),
+        "number" => parse_number_value(value).map(serde_json::Value::Number),
         "bool" => match value.trim() {
             "true" => Ok(serde_json::Value::Bool(true)),
             "false" => Ok(serde_json::Value::Bool(false)),
@@ -146,6 +143,25 @@ pub fn parse_value_by_kind(kind: &str, value: &str) -> Result<serde_json::Value,
             .map_err(|err| format!("invalid array json: {err}")),
         "null" => Ok(serde_json::Value::Null),
         _ => Ok(serde_json::Value::String(value.to_string())),
+    }
+}
+
+fn parse_number_value(value: &str) -> Result<serde_json::Number, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("empty number".to_string());
+    }
+    if trimmed.contains('.') {
+        let parsed = trimmed
+            .parse::<f64>()
+            .map_err(|_| format!("invalid number for {value}"))?;
+        serde_json::Number::from_f64(parsed)
+            .ok_or_else(|| format!("invalid number for {value}"))
+    } else {
+        let parsed = trimmed
+            .parse::<i64>()
+            .map_err(|_| format!("invalid number for {value}"))?;
+        Ok(serde_json::Number::from(parsed))
     }
 }
 
