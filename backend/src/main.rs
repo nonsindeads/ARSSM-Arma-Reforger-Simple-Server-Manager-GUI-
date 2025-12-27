@@ -1447,7 +1447,7 @@ fn render_profiles_page(
         rows.push_str(&format!(
             r#"<tr>
               <td><a href="/server/{id}">{name}</a> {active_badge}</td>
-              <td>{url}</td>
+              <td class="arssm-text">{url}</td>
               <td>
                 <form method="post" action="/server/{id}/activate">
                   <button class="btn btn-sm btn-outline-secondary" type="submit">Set active</button>
@@ -1462,7 +1462,7 @@ fn render_profiles_page(
     }
 
     if rows.is_empty() {
-        rows.push_str("<tr><td colspan=\"3\">No profiles yet.</td></tr>");
+        rows.push_str("<tr><td colspan=\"3\" class=\"arssm-text\">No profiles yet.</td></tr>");
     }
 
     let content = format!(
@@ -1508,7 +1508,7 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
           <dt class="col-sm-3">Profile ID</dt>
           <dd class="col-sm-9">{id}</dd>
           <dt class="col-sm-3">Workshop URL</dt>
-          <dd class="col-sm-9">{url}</dd>
+          <dd class="col-sm-9 arssm-text">{url}</dd>
           <dt class="col-sm-3">Selected scenario</dt>
           <dd class="col-sm-9">{scenario}</dd>
           <dt class="col-sm-3">Active</dt>
@@ -1851,7 +1851,7 @@ fn render_workshop_page(
         {notice}
         <div class="card card-body mb-4">
           <p class="mb-1"><strong>Profile:</strong> {name}</p>
-          <p class="mb-3"><strong>Workshop URL:</strong> {url}</p>
+          <p class="mb-3"><strong>Workshop URL:</strong> <span class="arssm-text">{url}</span></p>
           <form method="post" action="/server/{id}/workshop/resolve" hx-post="/server/{id}/workshop/resolve" hx-target="#workshop-resolve-panel" hx-swap="outerHTML">
             <button class="btn btn-primary" type="submit">Resolve</button>
             <a class="btn btn-outline-secondary ms-2" href="/server/{id}/config-preview">Go to Config Preview</a>
@@ -2166,7 +2166,7 @@ fn render_packages_page(
         ));
     }
     if mod_rows.is_empty() {
-        mod_rows.push_str("<tr><td colspan=\"3\">No mods defined.</td></tr>");
+        mod_rows.push_str("<tr><td colspan=\"3\" class=\"arssm-text\">No mods defined.</td></tr>");
     }
 
     let mut package_rows = String::new();
@@ -2193,7 +2193,7 @@ fn render_packages_page(
         ));
     }
     if package_rows.is_empty() {
-        package_rows.push_str("<tr><td colspan=\"3\" class=\"text-muted\">No packages defined.</td></tr>");
+        package_rows.push_str("<tr><td colspan=\"3\" class=\"arssm-text\">No packages defined.</td></tr>");
     }
 
     let content = format!(

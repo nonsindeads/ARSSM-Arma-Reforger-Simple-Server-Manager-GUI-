@@ -104,6 +104,10 @@ body {
   color: var(--arssm-muted) !important;
 }
 
+.arssm-text {
+  color: var(--arssm-text) !important;
+}
+
 .breadcrumb {
   --bs-breadcrumb-divider-color: var(--arssm-muted);
   margin-bottom: 0;
