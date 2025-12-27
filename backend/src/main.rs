@@ -2442,8 +2442,8 @@ fn render_package_edit_page_with_selection(
             selected_rows.push_str(&format!(
                 r#"<div class="d-flex align-items-center justify-content-between gap-2">
                   <div>
-                    <div class="arssm-text">{id}</div>
-                    <div class="text-muted small">{name}</div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
                   </div>
                   <form method="post" action="/packages/packs/{id}/selection">
                     {hidden_ids}
@@ -2461,8 +2461,8 @@ fn render_package_edit_page_with_selection(
             available_rows.push_str(&format!(
                 r#"<div class="d-flex align-items-center justify-content-between gap-2">
                   <div>
-                    <div class="arssm-text">{id}</div>
-                    <div class="text-muted small">{name}</div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
                   </div>
                   <form method="post" action="/packages/packs/{id}/selection">
                     {hidden_ids}
