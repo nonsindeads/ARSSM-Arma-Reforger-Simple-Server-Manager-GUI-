@@ -119,6 +119,9 @@ pub fn parse_defaults_form(
         if let Some(path) = key.strip_prefix("default_value.") {
             let type_key = format!("default_type.{path}");
             let kind = form.get(&type_key).map(String::as_str).unwrap_or("string");
+            if value.trim().is_empty() {
+                continue;
+            }
             let parsed = parse_value_by_kind(kind, value)?;
             set_json_path(&mut updated, path, parsed)?;
         }
