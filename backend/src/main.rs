@@ -2649,26 +2649,6 @@ async fn resolve_and_update_profile(
     Ok(result)
 }
 
-fn render_mod_options(mods: &[backend::models::ModEntry], selected: Option<&[String]>) -> String {
-    let mut options = String::new();
-    for entry in mods {
-        let is_selected = selected
-            .map(|list| list.iter().any(|id| id == &entry.mod_id))
-            .unwrap_or(false);
-        let selected_attr = if is_selected { "selected" } else { "" };
-        options.push_str(&format!(
-            r#"<option value="{id}" {selected}>{name} ({id})</option>"#,
-            id = html_escape::encode_text(&entry.mod_id),
-            name = html_escape::encode_text(&entry.name),
-            selected = selected_attr,
-        ));
-    }
-    if options.is_empty() {
-        options.push_str("<option value=\"\">No mods available</option>");
-    }
-    options
-}
-
 fn render_mod_checklist(mods: &[backend::models::ModEntry], selected: Option<&[String]>) -> String {
     if mods.is_empty() {
         return "<div class=\"text-muted\">No mods available</div>".to_string();
