@@ -16,6 +16,16 @@ pub struct ServerProfile {
     #[serde(default)]
     pub load_session_save: bool,
     #[serde(default)]
+    pub server_path_override: Option<String>,
+    #[serde(default)]
+    pub workshop_path_override: Option<String>,
+    #[serde(default)]
+    pub mod_path_override: Option<String>,
+    #[serde(default)]
+    pub server_json_overrides: serde_json::Value,
+    #[serde(default)]
+    pub server_json_override_enabled: std::collections::HashMap<String, bool>,
+    #[serde(default)]
     pub generated_config_path: Option<String>,
     #[serde(default)]
     pub last_resolved_at: Option<String>,

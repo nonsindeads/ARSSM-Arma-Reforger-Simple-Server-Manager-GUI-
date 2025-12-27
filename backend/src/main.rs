@@ -3,6 +3,10 @@ use axum::{
 };
 use backend::{
     config_gen::generate_server_config,
+    defaults::{
+        apply_default_server_json_settings, apply_profile_overrides, flatten_defaults,
+        parse_defaults_form,
+    },
     models::ServerProfile,
     runner::{RunManager, RunStatus},
     storage::{
@@ -76,6 +80,8 @@ async fn main() {
         .route("/server/:profile_id/activate", axum::routing::post(activate_profile))
         .route("/server/:profile_id/edit", get(edit_profile_page).post(save_profile_edit))
         .route("/server/:profile_id/delete", axum::routing::post(delete_profile_action))
+        .route("/server/:profile_id/paths", axum::routing::post(save_profile_paths))
+        .route("/server/:profile_id/overrides", axum::routing::post(save_profile_overrides))
         .route("/server/new", get(new_profile_page))
         .route("/server/new/resolve", axum::routing::post(new_profile_resolve))
         .route("/server/new/create", axum::routing::post(new_profile_create))
@@ -218,13 +224,19 @@ async fn profile_detail(
     )))
 }
 
+#[derive(Deserialize)]
+struct ProfileTabQuery {
+    tab: Option<String>,
+}
+
 async fn edit_profile_page(
     Path(profile_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<ProfileTabQuery>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
-    Ok(Html(render_profile_edit(&profile, None)))
+    Ok(Html(render_profile_edit(&profile, query.tab.as_deref(), None)))
 }
 
 #[derive(Deserialize)]
@@ -244,6 +256,7 @@ async fn save_profile_edit(
     if form.display_name.trim().is_empty() || form.workshop_url.trim().is_empty() {
         return Ok(Html(render_profile_edit(
             &profile,
+            Some("general"),
             Some("Display name and workshop URL are required."),
         )));
     }
@@ -254,7 +267,7 @@ async fn save_profile_edit(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_profile_edit(&profile, Some("Profile updated."))))
+    Ok(Html(render_profile_edit(&profile, Some("general"), Some("Profile updated."))))
 }
 
 async fn delete_profile_action(
@@ -282,6 +295,70 @@ async fn delete_profile_action(
         &profiles,
         settings.active_profile_id.as_deref(),
         Some("Profile deleted."),
+    )))
+}
+
+#[derive(Deserialize)]
+struct ProfilePathsForm {
+    server_path_override: String,
+    workshop_path_override: String,
+    mod_path_override: String,
+}
+
+async fn save_profile_paths(
+    Path(profile_id): Path<String>,
+    Form(form): Form<ProfilePathsForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+
+    profile.server_path_override = normalize_optional_path(&form.server_path_override);
+    profile.workshop_path_override = normalize_optional_path(&form.workshop_path_override);
+    profile.mod_path_override = normalize_optional_path(&form.mod_path_override);
+
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_profile_edit(&profile, Some("paths"), Some("Paths saved."))))
+}
+
+async fn save_profile_overrides(
+    State(state): State<AppState>,
+    Path(profile_id): Path<String>,
+    Form(form): Form<std::collections::HashMap<String, String>>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    let mut settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    apply_default_server_json(&mut settings);
+
+    let (overrides, enabled) = match parse_defaults_form(&form, &settings.server_json_defaults) {
+        Ok(result) => result,
+        Err(err) => {
+            return Ok(Html(render_profile_edit(
+                &profile,
+                Some("overrides"),
+                Some(&err),
+            )))
+        }
+    };
+
+    profile.server_json_overrides = overrides;
+    profile.server_json_override_enabled = enabled;
+
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_profile_edit(
+        &profile,
+        Some("overrides"),
+        Some("Overrides saved."),
     )))
 }
 
@@ -359,6 +436,11 @@ async fn new_profile_create(
         dependency_mod_ids: parse_mod_ids(form.dependency_mod_ids.as_deref().unwrap_or("")),
         optional_mod_ids: parse_mod_ids(form.optional_mod_ids.as_deref().unwrap_or("")),
         load_session_save: false,
+        server_path_override: None,
+        workshop_path_override: None,
+        mod_path_override: None,
+        server_json_overrides: serde_json::Value::Null,
+        server_json_override_enabled: std::collections::HashMap::new(),
         generated_config_path: None,
         last_resolved_at: None,
         last_resolve_hash: None,
@@ -737,13 +819,17 @@ async fn profile_workshop_save(
 }
 
 async fn config_preview_page(
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
 ) -> Result<Html<String>, (StatusCode, String)> {
     let profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
 
-    let preview = match generate_config_for_profile(&profile) {
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let preview = match generate_config_for_profile(&profile, &settings) {
         Ok(value) => serde_json::to_string_pretty(&value)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         Err(err) => err,
@@ -771,7 +857,10 @@ async fn config_preview_partial(
         )));
     }
 
-    let preview = match generate_config_for_profile(&profile) {
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let preview = match generate_config_for_profile(&profile, &settings) {
         Ok(value) => serde_json::to_string_pretty(&value)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         Err(err) => err,
@@ -802,7 +891,10 @@ async fn write_config(
         return Err((StatusCode::BAD_REQUEST, message));
     }
 
-    let config = generate_config_for_profile(&profile)
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let config = generate_config_for_profile(&profile, &settings)
         .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
     let config_json = serde_json::to_string_pretty(&config)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -856,7 +948,10 @@ async fn regenerate_config(
         Some("Config regenerated with resolve warnings.")
     };
 
-    let preview = match generate_config_for_profile(&profile) {
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let preview = match generate_config_for_profile(&profile, &settings) {
         Ok(value) => serde_json::to_string_pretty(&value)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         Err(err) => err,
@@ -1254,13 +1349,6 @@ fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Opti
     )
 }
 
-#[derive(Debug)]
-struct DefaultField {
-    path: String,
-    kind: String,
-    value: String,
-}
-
 fn render_defaults_form(settings: &AppSettings) -> String {
     let fields = flatten_defaults(&settings.server_json_defaults);
     let mut disabled_keys = Vec::new();
@@ -1451,14 +1539,26 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
     )
 }
 
-fn render_profile_edit(profile: &ServerProfile, message: Option<&str>) -> String {
+fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Option<&str>) -> String {
     let notice = message
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
         .unwrap_or_default();
-    let content = format!(
-        r#"<h1 class="h3 mb-3">Edit Profile</h1>
-        {notice}
-        <form method="post" action="/server/{id}/edit" class="card card-body mb-4">
+    let active_tab = tab.unwrap_or("general");
+    let tabs = format!(
+        r#"<ul class="nav nav-tabs mb-3">
+          <li class="nav-item"><a class="nav-link {general_active}" href="/server/{id}/edit?tab=general">Allgemein</a></li>
+          <li class="nav-item"><a class="nav-link {paths_active}" href="/server/{id}/edit?tab=paths">Pfade</a></li>
+          <li class="nav-item"><a class="nav-link {overrides_active}" href="/server/{id}/edit?tab=overrides">server.json Overrides</a></li>
+        </ul>"#,
+        id = html_escape::encode_text(&profile.profile_id),
+        general_active = if active_tab == "general" { "active" } else { "" },
+        paths_active = if active_tab == "paths" { "active" } else { "" },
+        overrides_active = if active_tab == "overrides" { "active" } else { "" },
+    );
+
+    let general_content = format!(
+        r#"<form method="post" action="/server/{id}/edit" class="card card-body mb-4">
+          <h2 class="h5">Allgemein</h2>
           <div class="mb-3">
             <label class="form-label" for="display_name">Display name</label>
             <input class="form-control" id="display_name" name="display_name" value="{name}">
@@ -1475,10 +1575,51 @@ fn render_profile_edit(profile: &ServerProfile, message: Option<&str>) -> String
         <form method="post" action="/server/{id}/delete">
           <button class="btn btn-outline-danger" type="submit">Delete profile</button>
         </form>"#,
-        notice = notice,
         id = html_escape::encode_text(&profile.profile_id),
         name = html_escape::encode_text(&profile.display_name),
         url = html_escape::encode_text(&profile.workshop_url),
+    );
+
+    let paths_content = format!(
+        r#"<form method="post" action="/server/{id}/paths" class="card card-body mb-4">
+          <h2 class="h5">Pfade (Override)</h2>
+          <p class="text-muted">Leer lassen, um globale Settings zu verwenden.</p>
+          <div class="mb-3">
+            <label class="form-label" for="server_path_override">Server-Pfad</label>
+            <input class="form-control" id="server_path_override" name="server_path_override" value="{server_path}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="workshop_path_override">Workshop-Pfad</label>
+            <input class="form-control" id="workshop_path_override" name="workshop_path_override" value="{workshop_path}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="mod_path_override">Mod-Pfad</label>
+            <input class="form-control" id="mod_path_override" name="mod_path_override" value="{mod_path}">
+          </div>
+          <button class="btn btn-primary" type="submit">Save paths</button>
+        </form>"#,
+        id = html_escape::encode_text(&profile.profile_id),
+        server_path = html_escape::encode_text(profile.server_path_override.as_deref().unwrap_or("")),
+        workshop_path = html_escape::encode_text(profile.workshop_path_override.as_deref().unwrap_or("")),
+        mod_path = html_escape::encode_text(profile.mod_path_override.as_deref().unwrap_or("")),
+    );
+
+    let overrides_content = render_profile_overrides_form(profile);
+
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Edit Profile</h1>
+        {notice}
+        {tabs}
+        {tab_content}"#,
+        notice = notice,
+        tabs = tabs,
+        tab_content = if active_tab == "overrides" {
+            overrides_content
+        } else if active_tab == "paths" {
+            paths_content
+        } else {
+            general_content
+        },
     );
 
     render_layout(
@@ -1490,6 +1631,78 @@ fn render_profile_edit(profile: &ServerProfile, message: Option<&str>) -> String
             breadcrumb("Edit", None),
         ],
         &content,
+    )
+}
+
+fn render_profile_overrides_form(profile: &ServerProfile) -> String {
+    let overrides = if profile.server_json_overrides.is_object() {
+        profile.server_json_overrides.clone()
+    } else {
+        serde_json::Value::Object(serde_json::Map::new())
+    };
+
+    let fields = if overrides.is_object()
+        && !overrides
+            .as_object()
+            .map(|map| map.is_empty())
+            .unwrap_or(true)
+    {
+        flatten_defaults(&overrides)
+    } else if let Ok(value) = serde_json::from_str(backend::config_gen::baseline_config()) {
+        flatten_defaults(&value)
+    } else {
+        Vec::new()
+    };
+    let mut rows = String::new();
+    for field in fields {
+        let enabled = profile
+            .server_json_override_enabled
+            .get(&field.path)
+            .copied()
+            .unwrap_or(false);
+        let checked = if enabled { "checked" } else { "" };
+        rows.push_str(&format!(
+            r#"<tr>
+              <td><input type="checkbox" name="default_enabled.{path}" {checked}></td>
+              <td><code>{path}</code></td>
+              <td>
+                <input type="hidden" name="default_type.{path}" value="{kind}">
+                <input class="form-control form-control-sm" name="default_value.{path}" value="{value}">
+              </td>
+            </tr>"#,
+            path = html_escape::encode_text(&field.path),
+            kind = html_escape::encode_text(&field.kind),
+            value = html_escape::encode_text(&field.value),
+            checked = checked,
+        ));
+    }
+
+    if rows.is_empty() {
+        rows.push_str("<tr><td colspan=\"3\">No overrides defined yet.</td></tr>");
+    }
+
+    format!(
+        r#"<form method="post" action="/server/{id}/overrides">
+          <h2 class="h5">server.json Overrides</h2>
+          <p class="text-muted">Aktiviere Felder, um die globalen Defaults zu überschreiben.</p>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead>
+                <tr>
+                  <th>Active</th>
+                  <th>Option</th>
+                  <th>Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows}
+              </tbody>
+            </table>
+          </div>
+          <button class="btn btn-primary" type="submit">Save overrides</button>
+        </form>"#,
+        id = html_escape::encode_text(&profile.profile_id),
+        rows = rows,
     )
 }
 
@@ -2177,7 +2390,10 @@ fn new_package_id() -> String {
     format!("package-{nanos}")
 }
 
-fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Value, String> {
+fn generate_config_for_profile(
+    profile: &ServerProfile,
+    settings: &AppSettings,
+) -> Result<serde_json::Value, String> {
     let scenario = profile
         .selected_scenario_id_path
         .as_deref()
@@ -2187,7 +2403,11 @@ fn generate_config_for_profile(profile: &ServerProfile) -> Result<serde_json::Va
     mod_ids.extend(profile.dependency_mod_ids.clone());
     mod_ids.extend(profile.optional_mod_ids.clone());
 
-    generate_server_config(scenario, &mod_ids, Some(&profile.display_name))
+    let mut config = generate_server_config(scenario, &mod_ids, Some(&profile.display_name))?;
+    apply_default_server_json_settings(&mut config, settings);
+    apply_profile_overrides(&mut config, profile)?;
+
+    Ok(config)
 }
 
 async fn start_profile(
@@ -2318,6 +2538,15 @@ fn parse_mod_ids(input: &str) -> Vec<String> {
         .collect()
 }
 
+fn normalize_optional_path(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn now_timestamp() -> String {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -2353,127 +2582,7 @@ fn apply_default_server_json(settings: &mut AppSettings) {
     }
 }
 
-fn flatten_defaults(value: &serde_json::Value) -> Vec<DefaultField> {
-    let mut fields = Vec::new();
-    flatten_value(value, "", &mut fields);
-    fields
-}
-
-fn flatten_value(value: &serde_json::Value, prefix: &str, out: &mut Vec<DefaultField>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            for (key, val) in map {
-                let path = if prefix.is_empty() {
-                    key.to_string()
-                } else {
-                    format!("{prefix}.{key}")
-                };
-                flatten_value(val, &path, out);
-            }
-        }
-        serde_json::Value::Array(list) => {
-            let value_string = serde_json::to_string(list).unwrap_or_default();
-            out.push(DefaultField {
-                path: prefix.to_string(),
-                kind: "array".to_string(),
-                value: value_string,
-            });
-        }
-        serde_json::Value::String(text) => out.push(DefaultField {
-            path: prefix.to_string(),
-            kind: "string".to_string(),
-            value: text.clone(),
-        }),
-        serde_json::Value::Number(num) => out.push(DefaultField {
-            path: prefix.to_string(),
-            kind: "number".to_string(),
-            value: num.to_string(),
-        }),
-        serde_json::Value::Bool(value) => out.push(DefaultField {
-            path: prefix.to_string(),
-            kind: "bool".to_string(),
-            value: value.to_string(),
-        }),
-        serde_json::Value::Null => out.push(DefaultField {
-            path: prefix.to_string(),
-            kind: "null".to_string(),
-            value: "".to_string(),
-        }),
-    }
-}
-
-fn parse_defaults_form(
-    form: &std::collections::HashMap<String, String>,
-    baseline: &serde_json::Value,
-) -> Result<(serde_json::Value, std::collections::HashMap<String, bool>), String> {
-    let mut updated = baseline.clone();
-    let mut enabled = std::collections::HashMap::new();
-
-    let fields = flatten_defaults(baseline);
-    for field in fields {
-        enabled.insert(field.path, false);
-    }
-    for (key, _value) in form {
-        if let Some(path) = key.strip_prefix("default_enabled.") {
-            enabled.insert(path.to_string(), true);
-        }
-    }
-
-    for (key, value) in form {
-        if let Some(path) = key.strip_prefix("default_value.") {
-            let type_key = format!("default_type.{path}");
-            let kind = form.get(&type_key).map(String::as_str).unwrap_or("string");
-            let parsed = parse_value_by_kind(kind, value)?;
-            set_json_path(&mut updated, path, parsed)?;
-        }
-    }
-
-    Ok((updated, enabled))
-}
-
-fn parse_value_by_kind(kind: &str, value: &str) -> Result<serde_json::Value, String> {
-    match kind {
-        "string" => Ok(serde_json::Value::String(value.to_string())),
-        "number" => value
-            .parse::<f64>()
-            .map(serde_json::Value::from)
-            .map_err(|_| format!("invalid number for {value}")),
-        "bool" => match value.trim() {
-            "true" => Ok(serde_json::Value::Bool(true)),
-            "false" => Ok(serde_json::Value::Bool(false)),
-            _ => Err(format!("invalid bool for {value}")),
-        },
-        "array" => serde_json::from_str(value)
-            .map_err(|err| format!("invalid array json: {err}")),
-        "null" => Ok(serde_json::Value::Null),
-        _ => Ok(serde_json::Value::String(value.to_string())),
-    }
-}
-
-fn set_json_path(
-    target: &mut serde_json::Value,
-    path: &str,
-    value: serde_json::Value,
-) -> Result<(), String> {
-    let parts: Vec<&str> = path.split('.').collect();
-    let mut current = target;
-    for (idx, part) in parts.iter().enumerate() {
-        let is_last = idx == parts.len() - 1;
-        if is_last {
-            if let Some(obj) = current.as_object_mut() {
-                obj.insert(part.to_string(), value);
-                return Ok(());
-            } else {
-                return Err(format!("invalid path: {path}"));
-            }
-        } else {
-            current = current
-                .get_mut(*part)
-                .ok_or_else(|| format!("missing path segment: {part}"))?;
-        }
-    }
-    Ok(())
-}
+ 
 
 async fn active_profile_name(profile_id: Option<&str>) -> Option<String> {
     let profile_id = profile_id?;
