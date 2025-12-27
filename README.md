@@ -51,3 +51,10 @@ The backend exposes basic run endpoints and an SSE log stream:
 ## SteamCMD update (placeholder)
 
 `POST /api/steamcmd/update` returns a placeholder response for now.
+
+## Theme tokens
+
+Badge-aligned palette lives in `web/css/theme.css`. Use the `--arssm-*` tokens for all new UI:
+- `--arssm-bg`, `--arssm-surface`, `--arssm-border`
+- `--arssm-text`, `--arssm-muted`
+- `--arssm-accent` (primary actions, focus, warnings only)
