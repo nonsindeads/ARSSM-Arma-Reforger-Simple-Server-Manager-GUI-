@@ -17,6 +17,7 @@ use backend::{
     workshop::{ReqwestFetcher, WorkshopResolveRequest, WorkshopResolver},
 };
 use serde::{Deserialize, Serialize};
+use serde::de::{self, Deserializer};
 use tracing::info;
 use std::{io, path::PathBuf};
 use tower_http::services::ServeDir;
@@ -650,6 +651,7 @@ async fn delete_mod(
 #[derive(Deserialize)]
 struct PackageForm {
     name: String,
+    #[serde(default, deserialize_with = "deserialize_mod_ids")]
     mod_ids: Option<Vec<String>>,
 }
 
@@ -2663,6 +2665,70 @@ fn parse_mod_ids(input: &str) -> Vec<String> {
         .filter(|value| !value.is_empty())
         .map(|value| value.to_string())
         .collect()
+}
+
+fn deserialize_mod_ids<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct ModIdsVisitor;
+
+    impl<'de> de::Visitor<'de> for ModIdsVisitor {
+        type Value = Option<Vec<String>>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a string or a list of strings")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(Some(Vec::new()))
+            } else {
+                Ok(Some(vec![trimmed.to_string()]))
+            }
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(item) = seq.next_element::<String>()? {
+                let trimmed = item.trim();
+                if !trimmed.is_empty() {
+                    values.push(trimmed.to_string());
+                }
+            }
+            Ok(Some(values))
+        }
+    }
+
+    deserializer.deserialize_any(ModIdsVisitor)
 }
 
 fn parse_scenario_ids(input: &str) -> Vec<String> {
