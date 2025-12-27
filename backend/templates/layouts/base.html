@@ -23,7 +23,7 @@
         <main class="col-12 col-md-9 col-lg-10 p-4">
           <div class="content-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             {% include "partials/breadcrumbs.html" %}
-            <div class="text-end" hx-get="/partials/header-status" hx-trigger="load, every 10s" hx-swap="outerHTML">
+            <div class="text-end" hx-get="/partials/header-status" hx-trigger="load, every 1s" hx-swap="outerHTML">
               <div id="header-status" class="small text-muted">Loading status...</div>
             </div>
           </div>

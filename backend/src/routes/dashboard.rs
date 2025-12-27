@@ -6,6 +6,7 @@ use axum::{Form, extract::State, http::StatusCode, response::Html};
 use backend::storage::{list_profiles, load_packages, load_settings};
 use minijinja::context;
 use serde::Deserialize;
+use sysinfo::{Pid, ProcessExt, System, SystemExt};
 
 pub async fn dashboard_page(
     State(state): State<AppState>,
@@ -53,13 +54,19 @@ pub async fn header_status_partial(
         "status-pill status-pill--stopped"
     };
 
+    let (cpu, ram) = if let Some(pid) = status.pid {
+        process_metrics(pid)
+    } else {
+        (None, None)
+    };
+
     let context = context! {
         datetime => datetime,
         run_status => run_status,
         status_class => status_class,
         uptime => uptime,
-        cpu => "n/a",
-        ram => "n/a",
+        cpu => cpu.unwrap_or_else(|| "n/a".to_string()),
+        ram => ram.unwrap_or_else(|| "n/a".to_string()),
     };
 
     let html = template_env()
@@ -68,6 +75,21 @@ pub async fn header_status_partial(
         .render(context)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
     Ok(Html(html))
+}
+
+fn process_metrics(pid: u32) -> (Option<String>, Option<String>) {
+    let mut system = System::new();
+    system.refresh_processes();
+    let pid = Pid::from_u32(pid);
+    if let Some(process) = system.process(pid) {
+        let cpu = format!("{:.1}%", process.cpu_usage());
+        let memory_kb = process.memory();
+        let memory_mb = (memory_kb as f64) / 1024.0;
+        let ram = format!("{memory_mb:.1} MB");
+        (Some(cpu), Some(ram))
+    } else {
+        (None, None)
+    }
 }
 
 pub async fn server_status_card(
