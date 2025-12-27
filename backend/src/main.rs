@@ -108,6 +108,7 @@ async fn main() {
         .route("/packages/mods/:mod_id/edit", axum::routing::post(edit_mod))
         .route("/packages/mods/:mod_id/delete", axum::routing::post(delete_mod))
         .route("/packages/packs/add", axum::routing::post(add_package))
+        .route("/packages/packs/:package_id", get(package_edit_page))
         .route("/packages/packs/:package_id/edit", axum::routing::post(edit_package))
         .route("/packages/packs/:package_id/delete", axum::routing::post(delete_package))
         .route("/run-logs", get(run_logs_page))
@@ -634,6 +635,23 @@ async fn delete_package(
         &packages,
         Some("Package deleted."),
     )))
+}
+
+async fn package_edit_page(
+    Path(package_id): Path<String>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let package = packages
+        .iter()
+        .find(|entry| entry.package_id == package_id)
+        .cloned()
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Package not found".to_string()))?;
+    Ok(Html(render_package_edit_page(&package, &mods)))
 }
 
 async fn profile_workshop_page(
@@ -1245,6 +1263,7 @@ struct DefaultField {
 
 fn render_defaults_form(settings: &AppSettings) -> String {
     let fields = flatten_defaults(&settings.server_json_defaults);
+    let mut disabled_keys = Vec::new();
     let mut rows = String::new();
     for field in fields {
         let enabled = settings
@@ -1252,6 +1271,9 @@ fn render_defaults_form(settings: &AppSettings) -> String {
             .get(&field.path)
             .copied()
             .unwrap_or(true);
+        if !enabled {
+            disabled_keys.push(field.path.clone());
+        }
         let checked = if enabled { "checked" } else { "" };
         rows.push_str(&format!(
             r#"<tr>
@@ -1269,10 +1291,26 @@ fn render_defaults_form(settings: &AppSettings) -> String {
         ));
     }
 
+    let disabled_summary = if disabled_keys.is_empty() {
+        "<p class=\"text-muted\">Alle Defaults aktiv.</p>".to_string()
+    } else {
+        let items = disabled_keys
+            .iter()
+            .map(|key| format!("<span class=\"badge text-bg-secondary me-1\">{}</span>", html_escape::encode_text(key)))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "<p class=\"text-muted\">Deaktiviert: {} Optionen</p><div class=\"mb-2\">{}</div>",
+            disabled_keys.len(),
+            items
+        )
+    };
+
     format!(
         r#"<form method="post" action="/settings/defaults">
           <h2 class="h5">server.json Defaults</h2>
           <p class="text-muted">Aktive Optionen werden bei neuen Profilen genutzt.</p>
+          {disabled_summary}
           <div class="table-responsive">
             <table class="table table-sm align-middle">
               <thead>
@@ -1290,6 +1328,7 @@ fn render_defaults_form(settings: &AppSettings) -> String {
           <button class="btn btn-primary" type="submit">Save defaults</button>
         </form>"#,
         rows = rows,
+        disabled_summary = disabled_summary,
     )
 }
 
@@ -1924,14 +1963,7 @@ fn render_packages_page(
               <td>{name}</td>
               <td>{mods}</td>
               <td class="d-flex gap-2">
-                <form method="post" action="/packages/packs/{id}/edit">
-                  <input type="hidden" name="package_id" value="{id}">
-                  <input class="form-control form-control-sm mb-2" name="name" value="{name}">
-                  <select class="form-select form-select-sm" name="mod_ids" multiple>
-                    {options}
-                  </select>
-                  <button class="btn btn-sm btn-outline-secondary mt-2" type="submit">Save</button>
-                </form>
+                <a class="btn btn-sm btn-outline-secondary" href="/packages/packs/{id}">Edit</a>
                 <form method="post" action="/packages/packs/{id}/delete">
                   <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
                 </form>
@@ -1940,7 +1972,6 @@ fn render_packages_page(
             id = html_escape::encode_text(&package.package_id),
             name = html_escape::encode_text(&package.name),
             mods = html_escape::encode_text(&mod_list),
-            options = render_mod_options(mods, Some(&package.mod_ids)),
         ));
     }
     if package_rows.is_empty() {
@@ -2013,6 +2044,47 @@ fn render_packages_page(
     );
 
     content
+}
+
+fn render_package_edit_page(
+    package: &backend::models::ModPackage,
+    mods: &[backend::models::ModEntry],
+) -> String {
+    let content = format!(
+        r#"<h1 class="h3 mb-3">Package bearbeiten</h1>
+        <form method="post" action="/packages/packs/{id}/edit" class="card card-body mb-4">
+          <div class="mb-3">
+            <label class="form-label" for="name">Name</label>
+            <input class="form-control" id="name" name="name" value="{name}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="mod_ids">Mods</label>
+            <select class="form-select" id="mod_ids" name="mod_ids" multiple>
+              {options}
+            </select>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">Save</button>
+            <a class="btn btn-outline-secondary" href="/packages">Back</a>
+          </div>
+        </form>
+        <form method="post" action="/packages/packs/{id}/delete">
+          <button class="btn btn-outline-danger" type="submit">Delete package</button>
+        </form>"#,
+        id = html_escape::encode_text(&package.package_id),
+        name = html_escape::encode_text(&package.name),
+        options = render_mod_options(mods, Some(&package.mod_ids)),
+    );
+
+    render_layout(
+        "ARSSM Package",
+        "packages",
+        vec![
+            breadcrumb("Pakete / Mods", Some("/packages".to_string())),
+            breadcrumb(&package.name, None),
+        ],
+        &content,
+    )
 }
 
 fn render_server_status_card(
@@ -2337,6 +2409,10 @@ fn parse_defaults_form(
     let mut updated = baseline.clone();
     let mut enabled = std::collections::HashMap::new();
 
+    let fields = flatten_defaults(baseline);
+    for field in fields {
+        enabled.insert(field.path, false);
+    }
     for (key, _value) in form {
         if let Some(path) = key.strip_prefix("default_enabled.") {
             enabled.insert(path.to_string(), true);

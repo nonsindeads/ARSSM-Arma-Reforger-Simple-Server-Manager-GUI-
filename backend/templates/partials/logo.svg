@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 160 160" role="img" aria-label="ARSSM badge">
+  <rect x="4" y="4" width="152" height="152" rx="22"
+        fill="#111814" stroke="#2a3b2f" stroke-width="2"/>
+
+  <g transform="translate(80,80)">
+    <circle r="44" fill="none" stroke="#8aa86b" stroke-width="10"/>
+
+    <path
+      d="M0,-56 v18
+         M0,56 v-18
+         M-56,0 h18
+         M56,0 h-18
+         M-40,-40 l13,13
+         M40,40 l-13,-13
+         M-40,40 l13,-13
+         M40,-40 l-13,13"
+      stroke="#8aa86b"
+      stroke-width="6"
+      stroke-linecap="round"/>
+
+    <path d="M-10,18 L0,-22 L10,18 Z" fill="#e5efe2"/>
+    <rect x="-18" y="18" width="36" height="14" rx="3" fill="#e5efe2"/>
+  </g>
+</svg>
