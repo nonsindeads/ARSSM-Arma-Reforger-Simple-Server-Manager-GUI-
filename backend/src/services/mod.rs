@@ -80,12 +80,22 @@ pub fn parse_scenario_ids(input: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn normalize_optional_path(input: &str) -> Option<String> {
+pub fn clean_path_input(input: &str) -> String {
     let trimmed = input.trim();
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+        .or_else(|| trimmed.strip_prefix('\'').and_then(|value| value.strip_suffix('\'')))
+        .unwrap_or(trimmed);
+    unquoted.trim().to_string()
+}
+
+pub fn normalize_optional_path(input: &str) -> Option<String> {
+    let trimmed = clean_path_input(input);
     if trimmed.is_empty() {
         None
     } else {
-        Some(trimmed.to_string())
+        Some(trimmed)
     }
 }
 
@@ -94,6 +104,11 @@ pub fn effective_value<'a>(override_value: &'a Option<String>, fallback: &'a str
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(fallback)
+}
+
+pub fn effective_path_value(override_value: &Option<String>, fallback: &str) -> String {
+    let raw = effective_value(override_value, fallback);
+    clean_path_input(raw)
 }
 
 pub fn update_list_selection(current: Option<Vec<String>>, action: &str, item_id: &str) -> Vec<String> {

@@ -1,6 +1,7 @@
 use crate::forms::{SettingsForm, SettingsQuery};
 use crate::routes::AppState;
 use crate::views::settings::render_settings_page;
+use crate::services::clean_path_input;
 use axum::{Form, Json, extract::State, http::StatusCode, response::Html};
 use backend::defaults::parse_defaults_form;
 use backend::storage::{AppSettings, load_settings, save_settings};
@@ -28,10 +29,10 @@ pub async fn settings_save(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     let mut settings = AppSettings {
-        steamcmd_dir: form.steamcmd_dir,
-        reforger_server_exe: form.reforger_server_exe,
-        reforger_server_work_dir: form.reforger_server_work_dir,
-        profile_dir_base: form.profile_dir_base,
+        steamcmd_dir: clean_path_input(&form.steamcmd_dir),
+        reforger_server_exe: clean_path_input(&form.reforger_server_exe),
+        reforger_server_work_dir: clean_path_input(&form.reforger_server_work_dir),
+        profile_dir_base: clean_path_input(&form.profile_dir_base),
         active_profile_id: existing.active_profile_id,
         server_json_defaults: existing.server_json_defaults,
         server_json_enabled: existing.server_json_enabled,

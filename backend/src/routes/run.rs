@@ -1,6 +1,6 @@
 use crate::forms::RunStartRequest;
 use crate::routes::AppState;
-use crate::services::{effective_value, generate_config_for_profile};
+use crate::services::{effective_path_value, generate_config_for_profile};
 use crate::views::run::render_run_logs_page;
 use axum::{
     Json,
@@ -101,11 +101,11 @@ pub(crate) async fn start_profile(
 ) -> Result<(), String> {
     let mut profile = load_profile(profile_id).await?;
 
-    let server_work_dir = effective_value(
+    let server_work_dir = effective_path_value(
         &profile.reforger_server_work_dir_override,
         &settings.reforger_server_work_dir,
     );
-    let config_path = generated_config_path(server_work_dir, &profile.profile_id);
+    let config_path = generated_config_path(&server_work_dir, &profile.profile_id);
 
     if tokio::fs::metadata(&config_path).await.is_err() {
         let packages = load_packages().await?;
@@ -125,14 +125,14 @@ pub(crate) async fn start_profile(
     }
 
     let profile_dir_base =
-        effective_value(&profile.profile_dir_base_override, &settings.profile_dir_base);
-    let profile_dir = PathBuf::from(profile_dir_base).join(&profile.profile_id);
+        effective_path_value(&profile.profile_dir_base_override, &settings.profile_dir_base);
+    let profile_dir = PathBuf::from(&profile_dir_base).join(&profile.profile_id);
     let server_exe =
-        effective_value(&profile.reforger_server_exe_override, &settings.reforger_server_exe);
+        effective_path_value(&profile.reforger_server_exe_override, &settings.reforger_server_exe);
 
     state
         .run_manager
-        .start(server_exe, server_work_dir, &profile, &config_path, &profile_dir)
+        .start(&server_exe, &server_work_dir, &profile, &config_path, &profile_dir)
         .await
 }
 

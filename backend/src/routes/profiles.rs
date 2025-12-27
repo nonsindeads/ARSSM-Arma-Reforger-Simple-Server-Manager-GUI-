@@ -4,7 +4,7 @@ use crate::forms::{
 };
 use crate::routes::AppState;
 use crate::services::{
-    effective_value, generate_config_for_profile, normalize_optional_path, parse_mod_ids,
+    effective_path_value, generate_config_for_profile, normalize_optional_path, parse_mod_ids,
     parse_scenario_ids, update_list_selection,
 };
 use crate::views::profiles::{
@@ -495,11 +495,11 @@ pub async fn write_config(
     let config_json = serde_json::to_string_pretty(&config)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
 
-    let server_work_dir = effective_value(
+    let server_work_dir = effective_path_value(
         &profile.reforger_server_work_dir_override,
         &settings.reforger_server_work_dir,
     );
-    let path = generated_config_path(server_work_dir, &profile.profile_id);
+    let path = generated_config_path(&server_work_dir, &profile.profile_id);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
