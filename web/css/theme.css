@@ -60,6 +60,13 @@ body {
   color: var(--arssm-text);
 }
 
+.arssm-panel {
+  background: var(--arssm-surface);
+  border: 1px solid var(--arssm-border);
+  border-radius: 12px;
+  color: var(--arssm-text);
+}
+
 .table {
   color: var(--arssm-text);
 }
@@ -74,6 +81,19 @@ body {
 
 .table-striped > tbody > tr:nth-of-type(odd) > * {
   background-color: var(--arssm-surface-2);
+}
+
+.arssm-table {
+  border: 1px solid var(--arssm-border);
+  background: var(--arssm-surface);
+}
+
+.arssm-table thead tr {
+  background: var(--arssm-bg);
+}
+
+.arssm-table tbody tr:hover > * {
+  background: var(--arssm-surface-2);
 }
 
 .text-muted {
@@ -109,6 +129,21 @@ textarea {
 .form-control:focus,
 .form-select:focus,
 textarea:focus {
+  border-color: var(--arssm-accent);
+  box-shadow: 0 0 0 0.2rem var(--arssm-focus);
+}
+
+.arssm-input {
+  background: var(--arssm-bg);
+  border-color: var(--arssm-border);
+  color: var(--arssm-text);
+}
+
+.arssm-input::placeholder {
+  color: var(--arssm-muted);
+}
+
+.arssm-input:focus {
   border-color: var(--arssm-accent);
   box-shadow: 0 0 0 0.2rem var(--arssm-focus);
 }
@@ -170,6 +205,13 @@ pre {
   background: var(--arssm-surface-2);
   border: 1px solid var(--arssm-border);
   color: var(--arssm-text);
+}
+
+.arssm-log {
+  background: var(--arssm-bg);
+  border: 1px solid var(--arssm-border);
+  color: var(--arssm-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 code {

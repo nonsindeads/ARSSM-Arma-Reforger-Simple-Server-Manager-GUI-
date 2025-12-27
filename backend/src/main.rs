@@ -155,22 +155,27 @@ fn health_html() -> &'static str {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ARSSM Health</title>
-    <style>
-      body { font-family: "Rajdhani", "Segoe UI", sans-serif; margin: 2rem; color: var(--arssm-text); background: var(--arssm-bg); }
-      label { display: block; margin-bottom: 0.5rem; }
-      input { width: 100%; max-width: 720px; padding: 0.5rem; background: var(--arssm-surface-2); border: 1px solid var(--arssm-border); color: var(--arssm-text); }
-      button { margin-top: 0.75rem; padding: 0.5rem 1rem; background: var(--arssm-accent); border: 1px solid var(--arssm-accent); color: var(--arssm-bg); }
-      pre { background: var(--arssm-surface-2); padding: 1rem; white-space: pre-wrap; border: 1px solid var(--arssm-border); }
-    </style>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH"
+      crossorigin="anonymous"
+    >
+    <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="/web/css/theme.css" rel="stylesheet">
   </head>
   <body>
-    <h1>ARSSM</h1>
-    <p>Status: ok</p>
-    <label for="workshop-url">Workshop URL</label>
-    <input id="workshop-url" type="text" value="https://reforger.armaplatform.com/workshop/595F2BF2F44836FB-RHS-StatusQuo">
-    <button id="resolve">Resolve</button>
-    <h2>Result</h2>
-    <pre id="output">Waiting for input.</pre>
+    <div class="container py-4">
+      <div class="arssm-panel p-4">
+        <h1 class="mb-3">ARSSM</h1>
+        <p class="text-muted">Status: ok</p>
+        <label class="form-label text-muted" for="workshop-url">Workshop URL</label>
+        <input class="form-control arssm-input" id="workshop-url" type="text" value="https://reforger.armaplatform.com/workshop/595F2BF2F44836FB-RHS-StatusQuo">
+        <button class="btn btn-primary mt-3" id="resolve">Resolve</button>
+        <h2 class="mt-4">Result</h2>
+        <pre class="arssm-log p-3" id="output">Waiting for input.</pre>
+      </div>
+    </div>
     <script>
       const button = document.getElementById('resolve');
       const output = document.getElementById('output');
@@ -1272,33 +1277,33 @@ fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Opti
           <h2 class="h5">Pfade</h2>
           <div class="mb-3">
             <label class="form-label" for="server_path">Server-Pfad</label>
-            <input class="form-control" id="server_path" name="server_path" value="{server_path}">
+            <input class="form-control arssm-input" id="server_path" name="server_path" value="{server_path}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="workshop_path">Workshop-Pfad</label>
-            <input class="form-control" id="workshop_path" name="workshop_path" value="{workshop_path}">
+            <input class="form-control arssm-input" id="workshop_path" name="workshop_path" value="{workshop_path}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="mod_path">Mod-Pfad</label>
-            <input class="form-control" id="mod_path" name="mod_path" value="{mod_path}">
+            <input class="form-control arssm-input" id="mod_path" name="mod_path" value="{mod_path}">
           </div>
           <hr>
           <h2 class="h6 text-uppercase text-muted">Runtime Paths</h2>
           <div class="mb-3">
             <label class="form-label" for="steamcmd_dir">SteamCMD directory</label>
-            <input class="form-control" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
+            <input class="form-control arssm-input" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="reforger_server_exe">Reforger server executable</label>
-            <input class="form-control" id="reforger_server_exe" name="reforger_server_exe" value="{reforger_server_exe}">
+            <input class="form-control arssm-input" id="reforger_server_exe" name="reforger_server_exe" value="{reforger_server_exe}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="reforger_server_work_dir">Reforger server work dir</label>
-            <input class="form-control" id="reforger_server_work_dir" name="reforger_server_work_dir" value="{reforger_server_work_dir}">
+            <input class="form-control arssm-input" id="reforger_server_work_dir" name="reforger_server_work_dir" value="{reforger_server_work_dir}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="profile_dir_base">Profile base directory</label>
-            <input class="form-control" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
+            <input class="form-control arssm-input" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
           </div>
           <button class="btn btn-primary" type="submit">Save</button>
         </form>
@@ -1369,7 +1374,7 @@ fn render_defaults_form(settings: &AppSettings) -> String {
               <td><code>{path}</code></td>
               <td>
                 <input type="hidden" name="default_type.{path}" value="{kind}">
-                <input class="form-control form-control-sm" name="default_value.{path}" value="{value}">
+                <input class="form-control form-control-sm arssm-input" name="default_value.{path}" value="{value}">
               </td>
             </tr>"#,
             path = html_escape::encode_text(&field.path),
@@ -1400,7 +1405,7 @@ fn render_defaults_form(settings: &AppSettings) -> String {
           <p class="text-muted">Aktive Optionen werden bei neuen Profilen genutzt.</p>
           {disabled_summary}
           <div class="table-responsive">
-            <table class="table table-sm align-middle">
+            <table class="table table-sm align-middle arssm-table">
               <thead>
                 <tr>
                   <th>Active</th>
@@ -1464,7 +1469,7 @@ fn render_profiles_page(
         r#"<h1 class="h3 mb-3">Server / Profile</h1>
         {notice}
         <a class="btn btn-primary mb-3" href="/server/new">Neues Profil</a>
-        <table class="table table-striped">
+        <table class="table table-striped arssm-table">
           <thead>
             <tr>
               <th>Profile</th>
@@ -1561,11 +1566,11 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
           <h2 class="h5">Allgemein</h2>
           <div class="mb-3">
             <label class="form-label" for="display_name">Display name</label>
-            <input class="form-control" id="display_name" name="display_name" value="{name}">
+            <input class="form-control arssm-input" id="display_name" name="display_name" value="{name}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="workshop_url">Workshop URL</label>
-            <input class="form-control" id="workshop_url" name="workshop_url" value="{url}">
+            <input class="form-control arssm-input" id="workshop_url" name="workshop_url" value="{url}">
           </div>
           <div class="d-flex gap-2">
             <button class="btn btn-primary" type="submit">Save</button>
@@ -1586,15 +1591,15 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
           <p class="text-muted">Leer lassen, um globale Settings zu verwenden.</p>
           <div class="mb-3">
             <label class="form-label" for="server_path_override">Server-Pfad</label>
-            <input class="form-control" id="server_path_override" name="server_path_override" value="{server_path}">
+            <input class="form-control arssm-input" id="server_path_override" name="server_path_override" value="{server_path}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="workshop_path_override">Workshop-Pfad</label>
-            <input class="form-control" id="workshop_path_override" name="workshop_path_override" value="{workshop_path}">
+            <input class="form-control arssm-input" id="workshop_path_override" name="workshop_path_override" value="{workshop_path}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="mod_path_override">Mod-Pfad</label>
-            <input class="form-control" id="mod_path_override" name="mod_path_override" value="{mod_path}">
+            <input class="form-control arssm-input" id="mod_path_override" name="mod_path_override" value="{mod_path}">
           </div>
           <button class="btn btn-primary" type="submit">Save paths</button>
         </form>"#,
@@ -1667,7 +1672,7 @@ fn render_profile_overrides_form(profile: &ServerProfile) -> String {
               <td><code>{path}</code></td>
               <td>
                 <input type="hidden" name="default_type.{path}" value="{kind}">
-                <input class="form-control form-control-sm" name="default_value.{path}" value="{value}">
+                <input class="form-control form-control-sm arssm-input" name="default_value.{path}" value="{value}">
               </td>
             </tr>"#,
             path = html_escape::encode_text(&field.path),
@@ -1686,7 +1691,7 @@ fn render_profile_overrides_form(profile: &ServerProfile) -> String {
           <h2 class="h5">server.json Overrides</h2>
           <p class="text-muted">Aktiviere Felder, um die globalen Defaults zu überschreiben.</p>
           <div class="table-responsive">
-            <table class="table table-sm align-middle">
+            <table class="table table-sm align-middle arssm-table">
               <thead>
                 <tr>
                   <th>Active</th>
@@ -1718,11 +1723,11 @@ fn render_new_profile_wizard(message: Option<&str>) -> String {
             <h2 class="h5">Schritt 1: Workshop</h2>
             <div class="mb-3">
               <label class="form-label" for="display_name">Display name</label>
-              <input class="form-control" id="display_name" name="display_name">
+              <input class="form-control arssm-input" id="display_name" name="display_name">
             </div>
             <div class="mb-3">
               <label class="form-label" for="workshop_url">Workshop URL</label>
-              <input class="form-control" id="workshop_url" name="workshop_url">
+              <input class="form-control arssm-input" id="workshop_url" name="workshop_url">
             </div>
             <button type="button" class="btn btn-outline-secondary" hx-post="/server/new/resolve" hx-target="#wizard-resolve" hx-swap="outerHTML" hx-include="#workshop_url">Workshop laden</button>
           </div>
@@ -1804,7 +1809,7 @@ fn render_new_profile_resolve(
             <input type="hidden" name="dependency_mod_ids" value="{dependency_ids}">
             <div class="mb-3">
               <label class="form-label" for="selected_scenario_id_path">Scenario</label>
-              <select class="form-select" id="selected_scenario_id_path" name="selected_scenario_id_path">
+              <select class="form-select arssm-input" id="selected_scenario_id_path" name="selected_scenario_id_path">
                 {scenario_options}
               </select>
             </div>
@@ -1813,7 +1818,7 @@ fn render_new_profile_resolve(
             <h2 class="h5">Schritt 3: Mod-Pakete</h2>
             <p class="text-muted">Pakete-Logik folgt.</p>
             <label class="form-label" for="optional_mod_ids">Optional mods (one ID per line)</label>
-            <textarea class="form-control" id="optional_mod_ids" name="optional_mod_ids" rows="4"></textarea>
+            <textarea class="form-control arssm-input" id="optional_mod_ids" name="optional_mod_ids" rows="4"></textarea>
           </div>
           <div class="card card-body mb-4">
             <h2 class="h5">Schritt 4: Konfiguration</h2>
@@ -1953,13 +1958,13 @@ fn render_workshop_panel(
           <form method="post" action="/server/{id}/workshop/save">
             <div class="mb-3">
               <label class="form-label" for="scenario">Scenario</label>
-              <select class="form-select" id="scenario" name="selected_scenario_id_path">
+              <select class="form-select arssm-input" id="scenario" name="selected_scenario_id_path">
                 {scenario_options}
               </select>
             </div>
             <div class="mb-3">
               <label class="form-label" for="optional_mod_ids">Optional mods (one ID per line)</label>
-              <textarea class="form-control" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
+              <textarea class="form-control arssm-input" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
             </div>
             <div class="d-flex gap-2">
               <button class="btn btn-success" type="submit">Save selection</button>
@@ -2034,7 +2039,7 @@ fn render_config_preview_partial(preview: &str, message: Option<&str>) -> String
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
         .unwrap_or_default();
     format!(
-        r#"{notice}<pre class="bg-light p-3 border">{preview}</pre>"#,
+        r#"{notice}<pre class="arssm-log p-3">{preview}</pre>"#,
         notice = notice,
         preview = html_escape::encode_text(preview),
     )
@@ -2060,7 +2065,7 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
           <div class="row g-3 align-items-end">
             <div class="col-md-6">
               <label class="form-label" for="profile-select">Profile</label>
-              <select class="form-select" id="profile-select">{options}</select>
+              <select class="form-select arssm-input" id="profile-select">{options}</select>
             </div>
             <div class="col-md-6">
               <div class="d-flex gap-2">
@@ -2074,7 +2079,7 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
         <div class="card">
           <div class="card-header">Live Log</div>
           <div class="card-body">
-            <pre class="bg-light p-3 border" id="log-output" style="height: 360px; overflow-y: auto;"></pre>
+            <pre class="arssm-log p-3" id="log-output" style="height: 360px; overflow-y: auto;"></pre>
           </div>
         </div>
         <script>
@@ -2148,7 +2153,7 @@ fn render_packages_page(
               <td class="d-flex gap-2">
                 <form method="post" action="/packages/mods/{mod_id}/edit" class="d-flex gap-2">
                   <input type="hidden" name="mod_id" value="{mod_id}">
-                  <input class="form-control form-control-sm" name="name" value="{name}">
+                  <input class="form-control form-control-sm arssm-input" name="name" value="{name}">
                   <button class="btn btn-sm btn-outline-secondary" type="submit">Save</button>
                 </form>
                 <form method="post" action="/packages/mods/{mod_id}/delete">
@@ -2200,16 +2205,16 @@ fn render_packages_page(
               <h2 class="h6 text-uppercase text-muted">Mods</h2>
               <form method="post" action="/packages/mods/add" class="row g-2 mb-3">
                 <div class="col-md-5">
-                  <input class="form-control" name="mod_id" placeholder="Mod ID or URL">
+                  <input class="form-control arssm-input" name="mod_id" placeholder="Mod ID or URL">
                 </div>
                 <div class="col-md-5">
-                  <input class="form-control" name="name" placeholder="Name">
+                  <input class="form-control arssm-input" name="name" placeholder="Name">
                 </div>
                 <div class="col-md-2 d-grid">
                   <button class="btn btn-primary" type="submit">Add</button>
                 </div>
               </form>
-              <table class="table table-sm">
+              <table class="table table-sm arssm-table">
                 <thead>
                   <tr>
                     <th>Mod ID</th>
@@ -2228,14 +2233,14 @@ fn render_packages_page(
               <h2 class="h6 text-uppercase text-muted">Pakete</h2>
               <form method="post" action="/packages/packs/add" class="mb-3">
                 <div class="mb-2">
-                  <input class="form-control" name="name" placeholder="Package name">
+                  <input class="form-control arssm-input" name="name" placeholder="Package name">
                 </div>
-                <select class="form-select" name="mod_ids" multiple>
+                <select class="form-select arssm-input" name="mod_ids" multiple>
                   {package_options}
                 </select>
                 <button class="btn btn-primary mt-2" type="submit">Create</button>
               </form>
-              <table class="table table-sm">
+              <table class="table table-sm arssm-table">
                 <thead>
                   <tr>
                     <th>Package</th>
@@ -2268,11 +2273,11 @@ fn render_package_edit_page(
         <form method="post" action="/packages/packs/{id}/edit" class="card card-body mb-4">
           <div class="mb-3">
             <label class="form-label" for="name">Name</label>
-            <input class="form-control" id="name" name="name" value="{name}">
+            <input class="form-control arssm-input" id="name" name="name" value="{name}">
           </div>
           <div class="mb-3">
             <label class="form-label" for="mod_ids">Mods</label>
-            <select class="form-select" id="mod_ids" name="mod_ids" multiple>
+            <select class="form-select arssm-input" id="mod_ids" name="mod_ids" multiple>
               {options}
             </select>
           </div>
