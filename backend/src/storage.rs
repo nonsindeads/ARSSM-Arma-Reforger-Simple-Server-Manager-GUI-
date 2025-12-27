@@ -87,6 +87,10 @@ pub fn packages_path() -> PathBuf {
     base_dir().join("packages.json")
 }
 
+pub fn logs_dir() -> PathBuf {
+    base_dir().join("logs")
+}
+
 pub async fn load_settings(path: &Path) -> Result<AppSettings, String> {
     match tokio::fs::read_to_string(path).await {
         Ok(contents) => serde_json::from_str(&contents)

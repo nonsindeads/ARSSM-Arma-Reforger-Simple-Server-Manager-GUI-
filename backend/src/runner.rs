@@ -1,11 +1,11 @@
-use crate::models::ServerProfile;
+use crate::{models::ServerProfile, storage::logs_dir};
 use std::{
     collections::VecDeque,
-    path::Path,
+    path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncBufReadExt, BufReader},
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     process::{Child, Command},
     sync::{broadcast, Mutex},
 };
@@ -24,6 +24,7 @@ struct RunInner {
     pid: Option<u32>,
     started_at: Option<u64>,
     buffer: VecDeque<String>,
+    log_path: Option<PathBuf>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -43,6 +44,7 @@ impl RunManager {
             pid: None,
             started_at: None,
             buffer: VecDeque::new(),
+            log_path: None,
         };
         Self {
             inner: Arc::new(Mutex::new(inner)),
@@ -75,6 +77,23 @@ impl RunManager {
         let inner = self.inner.lock().await;
         let start = inner.buffer.len().saturating_sub(limit);
         inner.buffer.iter().skip(start).cloned().collect()
+    }
+
+    pub async fn tail_persisted(&self, limit: usize) -> Vec<String> {
+        let path = {
+            let inner = self.inner.lock().await;
+            inner.log_path.clone()
+        };
+
+        if let Some(path) = path {
+            if let Ok(contents) = tokio::fs::read_to_string(&path).await {
+                let lines: Vec<&str> = contents.lines().collect();
+                let start = lines.len().saturating_sub(limit);
+                return lines[start..].iter().map(|line| (*line).to_string()).collect();
+            }
+        }
+
+        self.tail(limit).await
     }
 
     pub async fn start(
@@ -114,6 +133,8 @@ impl RunManager {
         inner.profile_id = Some(profile.profile_id.clone());
         inner.started_at = Some(current_epoch_seconds());
         inner.child = Some(child);
+        inner.buffer.clear();
+        inner.log_path = Some(log_file_path(profile.profile_id.as_str()));
 
         if let Some(stdout) = stdout {
             let manager = self.clone();
@@ -160,11 +181,17 @@ impl RunManager {
     }
 
     async fn push_line(&self, line: String) {
-        let mut inner = self.inner.lock().await;
-        if inner.buffer.len() >= MAX_LOG_LINES {
-            inner.buffer.pop_front();
+        let log_path = {
+            let mut inner = self.inner.lock().await;
+            if inner.buffer.len() >= MAX_LOG_LINES {
+                inner.buffer.pop_front();
+            }
+            inner.buffer.push_back(line.clone());
+            inner.log_path.clone()
+        };
+        if let Some(path) = log_path {
+            let _ = append_line_to_file(&path, &line).await;
         }
-        inner.buffer.push_back(line.clone());
         let _ = self.sender.send(line);
     }
 }
@@ -174,6 +201,32 @@ fn current_epoch_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+fn log_file_path(profile_id: &str) -> PathBuf {
+    let timestamp = current_epoch_seconds();
+    logs_dir().join(format!("{profile_id}-{timestamp}.log"))
+}
+
+async fn append_line_to_file(path: &Path, line: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|err| format!("failed to create log dir: {err}"))?;
+    }
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .map_err(|err| format!("failed to open log file: {err}"))?;
+    file.write_all(line.as_bytes())
+        .await
+        .map_err(|err| format!("failed to write log: {err}"))?;
+    file.write_all(b"\n")
+        .await
+        .map_err(|err| format!("failed to write log newline: {err}"))?;
+    Ok(())
 }
 
 #[cfg(test)]

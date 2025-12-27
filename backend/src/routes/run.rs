@@ -80,7 +80,7 @@ pub async fn run_logs_tail(
         .get("n")
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(200);
-    let lines = state.run_manager.tail(limit).await;
+    let lines = state.run_manager.tail_persisted(limit).await;
     Ok(Json(LogTailResponse { lines }))
 }
 
