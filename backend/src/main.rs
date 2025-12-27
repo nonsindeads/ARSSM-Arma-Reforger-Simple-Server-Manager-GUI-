@@ -2588,12 +2588,8 @@ fn render_package_edit_page_with_selection(
 
     let content = format!(
         r#"<h1 class="h3 mb-3">Package bearbeiten</h1>
-        <form method="post" action="/packages/packs/{id}/edit" class="card card-body mb-4">
-          <div class="mb-3">
-            <label class="form-label" for="name">Name</label>
-            <input class="form-control arssm-input" id="name" name="name" value="{name}">
-          </div>
-          {selected_hidden}
+        <div class="card card-body mb-4">
+          <h2 class="h6 text-uppercase text-muted">Mods</h2>
           <div class="row g-2 mb-3">
             <div class="col-md-6">
               <div class="text-muted small mb-1">Available</div>
@@ -2604,6 +2600,13 @@ fn render_package_edit_page_with_selection(
               <div class="d-grid gap-2">{selected_rows}</div>
             </div>
           </div>
+        </div>
+        <form method="post" action="/packages/packs/{id}/edit" class="card card-body mb-4">
+          <div class="mb-3">
+            <label class="form-label" for="name">Name</label>
+            <input class="form-control arssm-input" id="name" name="name" value="{name}">
+          </div>
+          {selected_hidden}
           <div class="d-flex gap-2">
             <button class="btn btn-arssm-primary" type="submit">Save</button>
             <a class="btn btn-arssm-secondary" href="/packages">Back</a>
@@ -2924,12 +2927,13 @@ where
         where
             E: de::Error,
         {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                Ok(Some(Vec::new()))
-            } else {
-                Ok(Some(vec![trimmed.to_string()]))
-            }
+            let values = value
+                .split(',')
+                .map(|item| item.trim())
+                .filter(|item| !item.is_empty())
+                .map(|item| item.to_string())
+                .collect::<Vec<_>>();
+            Ok(Some(values))
         }
 
         fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
