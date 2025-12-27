@@ -2348,9 +2348,12 @@ fn render_packages_page(
                 <div class="mb-2">
                   <input class="form-control arssm-input" name="name" placeholder="Package name">
                 </div>
-                <select class="form-select arssm-input" name="mod_ids" multiple>
-                  {package_options}
-                </select>
+                <div class="mb-2">
+                  <label class="form-label text-muted">Mods in package</label>
+                  <div class="d-grid gap-2">
+                    {package_checklist}
+                  </div>
+                </div>
                 <button class="btn btn-arssm-primary mt-2" type="submit">Create</button>
               </form>
               <table class="table table-sm arssm-table">
@@ -2371,7 +2374,7 @@ fn render_packages_page(
         notice = notice,
         mod_rows = mod_rows,
         package_rows = package_rows,
-        package_options = render_mod_options(mods, None),
+        package_checklist = render_mod_checklist(mods, None),
     );
 
     content
@@ -2403,10 +2406,10 @@ fn render_package_edit_page(
             <input class="form-control arssm-input" id="name" name="name" value="{name}">
           </div>
           <div class="mb-3">
-            <label class="form-label" for="mod_ids">Mods</label>
-            <select class="form-select arssm-input" id="mod_ids" name="mod_ids" multiple>
-              {options}
-            </select>
+            <label class="form-label text-muted">Mods in package</label>
+            <div class="d-grid gap-2">
+              {checklist}
+            </div>
           </div>
           <div class="d-flex gap-2">
             <button class="btn btn-arssm-primary" type="submit">Save</button>
@@ -2418,7 +2421,7 @@ fn render_package_edit_page(
         </form>"#,
         id = html_escape::encode_text(&package.package_id),
         name = html_escape::encode_text(&package.name),
-        options = render_mod_options(mods, Some(&package.mod_ids)),
+        checklist = render_mod_checklist(mods, Some(&package.mod_ids)),
     );
 
     render_layout(
@@ -2664,6 +2667,31 @@ fn render_mod_options(mods: &[backend::models::ModEntry], selected: Option<&[Str
         options.push_str("<option value=\"\">No mods available</option>");
     }
     options
+}
+
+fn render_mod_checklist(mods: &[backend::models::ModEntry], selected: Option<&[String]>) -> String {
+    if mods.is_empty() {
+        return "<div class=\"text-muted\">No mods available</div>".to_string();
+    }
+
+    let mut rows = String::new();
+    for entry in mods {
+        let is_checked = selected
+            .map(|list| list.iter().any(|id| id == &entry.mod_id))
+            .unwrap_or(false);
+        let checked = if is_checked { "checked" } else { "" };
+        rows.push_str(&format!(
+            r#"<label class="d-flex align-items-center gap-2">
+              <input type="checkbox" name="mod_ids" value="{id}" {checked}>
+              <span class="arssm-text">{name}</span>
+              <span class="text-muted small">{id}</span>
+            </label>"#,
+            id = html_escape::encode_text(&entry.mod_id),
+            name = html_escape::encode_text(&entry.name),
+            checked = checked,
+        ));
+    }
+    rows
 }
 
 fn parse_mod_id_input(input: &str) -> Option<String> {
