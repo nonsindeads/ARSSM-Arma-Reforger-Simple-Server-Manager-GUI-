@@ -525,13 +525,7 @@ async fn packages_page() -> Result<Html<String>, (StatusCode, String)> {
     let packages = load_packages()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let content = render_packages_page(&mods, &packages, None);
-    Ok(Html(render_layout(
-        "ARSSM Pakete",
-        "packages",
-        vec![breadcrumb("Pakete / Mods", None)],
-        &content,
-    )))
+    Ok(Html(render_packages_page_full(&mods, &packages, None)))
 }
 
 #[derive(Deserialize)]
@@ -551,7 +545,7 @@ async fn add_mod(
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if form.mod_id.trim().is_empty() || form.name.trim().is_empty() {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Mod ID and name are required."),
@@ -561,7 +555,7 @@ async fn add_mod(
     let mod_id = parse_mod_id_input(&form.mod_id)
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "Invalid mod ID".to_string()))?;
     if mods.iter().any(|entry| entry.mod_id == mod_id) {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Mod ID already exists."),
@@ -576,7 +570,11 @@ async fn add_mod(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_packages_page(&mods, &packages, Some("Mod added."))))
+    Ok(Html(render_packages_page_full(
+        &mods,
+        &packages,
+        Some("Mod added."),
+    )))
 }
 
 async fn edit_mod(
@@ -591,7 +589,7 @@ async fn edit_mod(
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if form.name.trim().is_empty() {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Mod name is required."),
@@ -608,7 +606,7 @@ async fn edit_mod(
     });
 
     if !updated {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Mod not found."),
@@ -619,7 +617,11 @@ async fn edit_mod(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_packages_page(&mods, &packages, Some("Mod updated."))))
+    Ok(Html(render_packages_page_full(
+        &mods,
+        &packages,
+        Some("Mod updated."),
+    )))
 }
 
 async fn delete_mod(
@@ -633,7 +635,7 @@ async fn delete_mod(
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if packages.iter().any(|package| package.mod_ids.iter().any(|id| id == &mod_id)) {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Mod is used in a package and cannot be deleted."),
@@ -645,7 +647,11 @@ async fn delete_mod(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_packages_page(&mods, &packages, Some("Mod deleted."))))
+    Ok(Html(render_packages_page_full(
+        &mods,
+        &packages,
+        Some("Mod deleted."),
+    )))
 }
 
 #[derive(Deserialize)]
@@ -666,7 +672,7 @@ async fn add_package(
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if form.name.trim().is_empty() {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Package name is required."),
@@ -683,7 +689,7 @@ async fn add_package(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_packages_page(
+    Ok(Html(render_packages_page_full(
         &mods,
         &packages,
         Some("Package created."),
@@ -702,7 +708,7 @@ async fn edit_package(
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if form.name.trim().is_empty() {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Package name is required."),
@@ -720,7 +726,7 @@ async fn edit_package(
     });
 
     if !updated {
-        return Ok(Html(render_packages_page(
+        return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
             Some("Package not found."),
@@ -731,7 +737,7 @@ async fn edit_package(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_packages_page(
+    Ok(Html(render_packages_page_full(
         &mods,
         &packages,
         Some("Package updated."),
@@ -752,7 +758,7 @@ async fn delete_package(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_packages_page(
+    Ok(Html(render_packages_page_full(
         &mods,
         &packages,
         Some("Package deleted."),
@@ -2369,6 +2375,20 @@ fn render_packages_page(
     );
 
     content
+}
+
+fn render_packages_page_full(
+    mods: &[backend::models::ModEntry],
+    packages: &[backend::models::ModPackage],
+    message: Option<&str>,
+) -> String {
+    let content = render_packages_page(mods, packages, message);
+    render_layout(
+        "ARSSM Pakete",
+        "packages",
+        vec![breadcrumb("Pakete / Mods", None)],
+        &content,
+    )
 }
 
 fn render_package_edit_page(
