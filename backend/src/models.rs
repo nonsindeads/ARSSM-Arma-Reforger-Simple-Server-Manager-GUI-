@@ -18,11 +18,13 @@ pub struct ServerProfile {
     #[serde(default)]
     pub load_session_save: bool,
     #[serde(default)]
-    pub server_path_override: Option<String>,
+    pub steamcmd_dir_override: Option<String>,
     #[serde(default)]
-    pub workshop_path_override: Option<String>,
+    pub reforger_server_exe_override: Option<String>,
     #[serde(default)]
-    pub mod_path_override: Option<String>,
+    pub reforger_server_work_dir_override: Option<String>,
+    #[serde(default)]
+    pub profile_dir_base_override: Option<String>,
     #[serde(default)]
     pub server_json_overrides: serde_json::Value,
     #[serde(default)]

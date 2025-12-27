@@ -43,9 +43,10 @@ fn applies_settings_defaults_and_profile_overrides() {
         dependency_mod_ids: Vec::new(),
         optional_mod_ids: Vec::new(),
         load_session_save: false,
-        server_path_override: None,
-        workshop_path_override: None,
-        mod_path_override: None,
+        steamcmd_dir_override: None,
+        reforger_server_exe_override: None,
+        reforger_server_work_dir_override: None,
+        profile_dir_base_override: None,
         server_json_overrides: serde_json::json!({
             "game": { "maxPlayers": 24 }
         }),

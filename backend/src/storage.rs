@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use crate::models::{ModEntry, ModPackage, ServerProfile};
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub steamcmd_dir: String,
     pub reforger_server_exe: String,
@@ -11,17 +11,26 @@ pub struct AppSettings {
     #[serde(default)]
     pub active_profile_id: Option<String>,
     #[serde(default)]
-    pub server_path: String,
-    #[serde(default)]
-    pub workshop_path: String,
-    #[serde(default)]
-    pub mod_path: String,
-    #[serde(default)]
     pub server_json_defaults: serde_json::Value,
     #[serde(default)]
     pub server_json_enabled: std::collections::HashMap<String, bool>,
 }
 
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            steamcmd_dir: r"C:\steamcmd".to_string(),
+            reforger_server_exe: r"C:\steamcmd\steamapps\common\Arma Reforger Server\ArmaReforgerServer.exe"
+                .to_string(),
+            reforger_server_work_dir: r"C:\steamcmd\steamapps\common\Arma Reforger Server"
+                .to_string(),
+            profile_dir_base: r"C:\ArmaReforger\profile".to_string(),
+            active_profile_id: None,
+            server_json_defaults: serde_json::Value::Null,
+            server_json_enabled: std::collections::HashMap::new(),
+        }
+    }
+}
 impl AppSettings {
     pub fn validate(&self) -> Result<(), String> {
         for (field, value) in [
@@ -63,10 +72,10 @@ pub fn profile_path(profile_id: &str) -> PathBuf {
     profiles_dir().join(format!("{profile_id}.json"))
 }
 
-pub fn generated_config_path(profile_id: &str) -> PathBuf {
-    profiles_dir()
+pub fn generated_config_path(work_dir: &str, profile_id: &str) -> PathBuf {
+    PathBuf::from(work_dir)
+        .join("configs")
         .join(profile_id)
-        .join("generated")
         .join("server.json")
 }
 

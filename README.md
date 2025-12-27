@@ -73,7 +73,7 @@ Profiles are stored as JSON files under the app data `profiles/` directory.
 ## Config generation
 
 Baseline config: `backend/assets/server.sample.json`.
-Generated configs are written to `profiles/<profile_id>/generated/server.json`.
+Generated configs are written to `configs/<profile_id>/server.json` under the Reforger server work directory.
 
 ## Run & Logs
 

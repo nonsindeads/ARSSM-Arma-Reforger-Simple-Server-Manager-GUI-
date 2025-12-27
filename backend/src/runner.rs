@@ -1,4 +1,3 @@
-use crate::storage::AppSettings;
 use crate::models::ServerProfile;
 use std::{
     collections::VecDeque,
@@ -80,7 +79,8 @@ impl RunManager {
 
     pub async fn start(
         &self,
-        settings: &AppSettings,
+        server_exe: &str,
+        server_work_dir: &str,
         profile: &ServerProfile,
         config_path: &Path,
         profile_dir: &Path,
@@ -90,9 +90,9 @@ impl RunManager {
             return Err("server already running".to_string());
         }
 
-        let mut command = Command::new(&settings.reforger_server_exe);
+        let mut command = Command::new(server_exe);
         command
-            .current_dir(&settings.reforger_server_work_dir)
+            .current_dir(server_work_dir)
             .arg("-config")
             .arg(config_path)
             .arg("-profile")

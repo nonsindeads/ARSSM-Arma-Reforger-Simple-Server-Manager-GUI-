@@ -331,9 +331,10 @@ async fn delete_profile_action(
 
 #[derive(Deserialize)]
 struct ProfilePathsForm {
-    server_path_override: String,
-    workshop_path_override: String,
-    mod_path_override: String,
+    steamcmd_dir_override: String,
+    reforger_server_exe_override: String,
+    reforger_server_work_dir_override: String,
+    profile_dir_base_override: String,
 }
 
 async fn save_profile_paths(
@@ -344,9 +345,12 @@ async fn save_profile_paths(
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
 
-    profile.server_path_override = normalize_optional_path(&form.server_path_override);
-    profile.workshop_path_override = normalize_optional_path(&form.workshop_path_override);
-    profile.mod_path_override = normalize_optional_path(&form.mod_path_override);
+    profile.steamcmd_dir_override = normalize_optional_path(&form.steamcmd_dir_override);
+    profile.reforger_server_exe_override =
+        normalize_optional_path(&form.reforger_server_exe_override);
+    profile.reforger_server_work_dir_override =
+        normalize_optional_path(&form.reforger_server_work_dir_override);
+    profile.profile_dir_base_override = normalize_optional_path(&form.profile_dir_base_override);
 
     save_profile(&profile)
         .await
@@ -469,9 +473,10 @@ async fn new_profile_create(
         dependency_mod_ids: parse_mod_ids(form.dependency_mod_ids.as_deref().unwrap_or("")),
         optional_mod_ids: parse_mod_ids(form.optional_mod_ids.as_deref().unwrap_or("")),
         load_session_save: false,
-        server_path_override: None,
-        workshop_path_override: None,
-        mod_path_override: None,
+        steamcmd_dir_override: None,
+        reforger_server_exe_override: None,
+        reforger_server_work_dir_override: None,
+        profile_dir_base_override: None,
         server_json_overrides: serde_json::Value::Null,
         server_json_override_enabled: std::collections::HashMap::new(),
         generated_config_path: None,
@@ -932,7 +937,11 @@ async fn write_config(
     let config_json = serde_json::to_string_pretty(&config)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
 
-    let path = generated_config_path(&profile.profile_id);
+    let server_work_dir = effective_value(
+        &profile.reforger_server_work_dir_override,
+        &settings.reforger_server_work_dir,
+    );
+    let path = generated_config_path(server_work_dir, &profile.profile_id);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -1176,9 +1185,6 @@ struct SettingsForm {
     reforger_server_exe: String,
     reforger_server_work_dir: String,
     profile_dir_base: String,
-    server_path: String,
-    workshop_path: String,
-    mod_path: String,
 }
 
 async fn settings_save(
@@ -1194,9 +1200,6 @@ async fn settings_save(
         reforger_server_work_dir: form.reforger_server_work_dir,
         profile_dir_base: form.profile_dir_base,
         active_profile_id: existing.active_profile_id,
-        server_path: form.server_path,
-        workshop_path: form.workshop_path,
-        mod_path: form.mod_path,
         server_json_defaults: existing.server_json_defaults,
         server_json_enabled: existing.server_json_enabled,
     };
@@ -1310,20 +1313,6 @@ fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Opti
         r#"<form method="post" action="/settings">
           <h2 class="h5">Pfade</h2>
           <div class="mb-3">
-            <label class="form-label" for="server_path">Server-Pfad</label>
-            <input class="form-control arssm-input" id="server_path" name="server_path" value="{server_path}">
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="workshop_path">Workshop-Pfad</label>
-            <input class="form-control arssm-input" id="workshop_path" name="workshop_path" value="{workshop_path}">
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="mod_path">Mod-Pfad</label>
-            <input class="form-control arssm-input" id="mod_path" name="mod_path" value="{mod_path}">
-          </div>
-          <hr>
-          <h2 class="h6 text-uppercase text-muted">Runtime Paths</h2>
-          <div class="mb-3">
             <label class="form-label" for="steamcmd_dir">SteamCMD directory</label>
             <input class="form-control arssm-input" id="steamcmd_dir" name="steamcmd_dir" value="{steamcmd_dir}">
           </div>
@@ -1334,10 +1323,12 @@ fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Opti
           <div class="mb-3">
             <label class="form-label" for="reforger_server_work_dir">Reforger server work dir</label>
             <input class="form-control arssm-input" id="reforger_server_work_dir" name="reforger_server_work_dir" value="{reforger_server_work_dir}">
+            <div class="form-text text-muted">Configs are written to <code>configs/&lt;profile_id&gt;/server.json</code> under this directory.</div>
           </div>
           <div class="mb-3">
             <label class="form-label" for="profile_dir_base">Profile base directory</label>
             <input class="form-control arssm-input" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
+            <div class="form-text text-muted">Profile runtime data is stored under <code>&lt;base&gt;/&lt;profile_id&gt;</code>.</div>
           </div>
           <button class="btn btn-arssm-primary" type="submit">Save</button>
         </form>
@@ -1355,9 +1346,6 @@ fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Opti
             status.textContent = data.message;
           }});
         </script>"#,
-        server_path = html_escape::encode_text(&settings.server_path),
-        workshop_path = html_escape::encode_text(&settings.workshop_path),
-        mod_path = html_escape::encode_text(&settings.mod_path),
         steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
         reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
         reforger_server_work_dir = html_escape::encode_text(&settings.reforger_server_work_dir),
@@ -1665,23 +1653,28 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
           <h2 class="h5">Pfade (Override)</h2>
           <p class="text-muted">Leer lassen, um globale Settings zu verwenden.</p>
           <div class="mb-3">
-            <label class="form-label" for="server_path_override">Server-Pfad</label>
-            <input class="form-control arssm-input" id="server_path_override" name="server_path_override" value="{server_path}">
+            <label class="form-label" for="steamcmd_dir_override">SteamCMD directory</label>
+            <input class="form-control arssm-input" id="steamcmd_dir_override" name="steamcmd_dir_override" value="{steamcmd_dir}">
           </div>
           <div class="mb-3">
-            <label class="form-label" for="workshop_path_override">Workshop-Pfad</label>
-            <input class="form-control arssm-input" id="workshop_path_override" name="workshop_path_override" value="{workshop_path}">
+            <label class="form-label" for="reforger_server_exe_override">Reforger server executable</label>
+            <input class="form-control arssm-input" id="reforger_server_exe_override" name="reforger_server_exe_override" value="{reforger_server_exe}">
           </div>
           <div class="mb-3">
-            <label class="form-label" for="mod_path_override">Mod-Pfad</label>
-            <input class="form-control arssm-input" id="mod_path_override" name="mod_path_override" value="{mod_path}">
+            <label class="form-label" for="reforger_server_work_dir_override">Reforger server work dir</label>
+            <input class="form-control arssm-input" id="reforger_server_work_dir_override" name="reforger_server_work_dir_override" value="{reforger_server_work_dir}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="profile_dir_base_override">Profile base directory</label>
+            <input class="form-control arssm-input" id="profile_dir_base_override" name="profile_dir_base_override" value="{profile_dir_base}">
           </div>
           <button class="btn btn-arssm-primary" type="submit">Save paths</button>
         </form>"#,
         id = html_escape::encode_text(&profile.profile_id),
-        server_path = html_escape::encode_text(profile.server_path_override.as_deref().unwrap_or("")),
-        workshop_path = html_escape::encode_text(profile.workshop_path_override.as_deref().unwrap_or("")),
-        mod_path = html_escape::encode_text(profile.mod_path_override.as_deref().unwrap_or("")),
+        steamcmd_dir = html_escape::encode_text(profile.steamcmd_dir_override.as_deref().unwrap_or("")),
+        reforger_server_exe = html_escape::encode_text(profile.reforger_server_exe_override.as_deref().unwrap_or("")),
+        reforger_server_work_dir = html_escape::encode_text(profile.reforger_server_work_dir_override.as_deref().unwrap_or("")),
+        profile_dir_base = html_escape::encode_text(profile.profile_dir_base_override.as_deref().unwrap_or("")),
     );
 
     let overrides_content = render_profile_overrides_form(profile);
@@ -2546,21 +2539,25 @@ async fn start_profile(
 ) -> Result<(), String> {
     let profile = load_profile(profile_id).await?;
 
-    let config_path = profile
-        .generated_config_path
-        .clone()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| generated_config_path(&profile.profile_id));
+    let server_work_dir = effective_value(
+        &profile.reforger_server_work_dir_override,
+        &settings.reforger_server_work_dir,
+    );
+    let config_path = generated_config_path(server_work_dir, &profile.profile_id);
 
     if tokio::fs::metadata(&config_path).await.is_err() {
         return Err("generated config not found".to_string());
     }
 
-    let profile_dir = PathBuf::from(&settings.profile_dir_base).join(&profile.profile_id);
+    let profile_dir_base =
+        effective_value(&profile.profile_dir_base_override, &settings.profile_dir_base);
+    let profile_dir = PathBuf::from(profile_dir_base).join(&profile.profile_id);
+    let server_exe =
+        effective_value(&profile.reforger_server_exe_override, &settings.reforger_server_exe);
 
     state
         .run_manager
-        .start(settings, &profile, &config_path, &profile_dir)
+        .start(server_exe, server_work_dir, &profile, &config_path, &profile_dir)
         .await
 }
 
@@ -2684,6 +2681,13 @@ fn normalize_optional_path(input: &str) -> Option<String> {
     } else {
         Some(trimmed.to_string())
     }
+}
+
+fn effective_value<'a>(override_value: &'a Option<String>, fallback: &'a str) -> &'a str {
+    override_value
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(fallback)
 }
 
 fn now_timestamp() -> String {
