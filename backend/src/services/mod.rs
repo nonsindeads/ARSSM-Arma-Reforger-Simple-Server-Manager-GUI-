@@ -1,8 +1,10 @@
-use crate::{
+use backend::{
+    config_gen::generate_server_config,
+    defaults,
     models::{ModPackage, ServerProfile},
     storage::AppSettings,
+    workshop,
 };
-use backend::config_gen::generate_server_config;
 
 pub fn generate_config_for_profile(
     profile: &ServerProfile,
@@ -18,16 +20,16 @@ pub fn generate_config_for_profile(
     let root_mod_id = profile
         .root_mod_id
         .clone()
-        .or_else(|| crate::workshop::extract_workshop_id_from_url(&profile.workshop_url))
+        .or_else(|| workshop::extract_workshop_id_from_url(&profile.workshop_url))
         .ok_or_else(|| "root_mod_id not set".to_string())?;
     mod_ids.push(root_mod_id);
     mod_ids.extend(profile.dependency_mod_ids.clone());
     mod_ids.extend(collect_optional_mod_ids(profile, packages));
 
     let mut config = generate_server_config(scenario, &mod_ids, Some(&profile.display_name))?;
-    crate::defaults::apply_default_server_json_settings(&mut config, settings);
-    crate::defaults::apply_profile_overrides(&mut config, profile)?;
-    crate::config_gen::apply_game_overrides(
+    defaults::apply_default_server_json_settings(&mut config, settings);
+    defaults::apply_profile_overrides(&mut config, profile)?;
+    backend::config_gen::apply_game_overrides(
         &mut config,
         scenario,
         &mod_ids,
@@ -51,7 +53,7 @@ pub fn collect_optional_mod_ids(profile: &ServerProfile, packages: &[ModPackage]
 pub fn parse_mod_id_input(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.contains("/workshop/") {
-        return crate::workshop::extract_workshop_id_from_url(trimmed);
+        return workshop::extract_workshop_id_from_url(trimmed);
     }
     if trimmed.len() == 16 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
         return Some(trimmed.to_string());

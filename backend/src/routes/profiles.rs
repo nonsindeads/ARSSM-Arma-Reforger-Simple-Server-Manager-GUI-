@@ -52,7 +52,7 @@ pub async fn profile_detail(
 }
 
 pub async fn edit_profile_page(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(profile_id): Path<String>,
     axum::extract::Query(query): axum::extract::Query<ProfileTabQuery>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -71,7 +71,7 @@ pub async fn edit_profile_page(
 }
 
 pub async fn save_profile_edit(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(profile_id): Path<String>,
     Form(form): Form<EditProfileForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -158,7 +158,7 @@ pub async fn delete_profile_action(
 }
 
 pub async fn save_profile_paths(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Path(profile_id): Path<String>,
     Form(form): Form<ProfilePathsForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -279,7 +279,10 @@ pub async fn new_profile_create(
         profile_id: new_profile_id(),
         display_name: form.display_name.trim().to_string(),
         workshop_url: form.workshop_url.trim().to_string(),
-        root_mod_id: form.root_mod_id.clone().and_then(normalize_optional_path),
+        root_mod_id: form
+            .root_mod_id
+            .clone()
+            .and_then(|value| normalize_optional_path(&value)),
         selected_scenario_id_path: selected.clone(),
         scenarios: scenario_ids,
         dependency_mod_ids,
