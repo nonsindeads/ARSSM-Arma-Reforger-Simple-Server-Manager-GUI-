@@ -93,7 +93,7 @@ body {
 }
 
 .arssm-table thead th {
-  color: var(--arssm-text);
+  color: var(--arssm-muted);
 }
 
 .arssm-table tbody tr:hover > * {
