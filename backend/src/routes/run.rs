@@ -1,6 +1,6 @@
 use crate::forms::RunStartRequest;
 use crate::routes::AppState;
-use crate::services::effective_value;
+use crate::services::{effective_value, generate_config_for_profile};
 use crate::views::run::render_run_logs_page;
 use axum::{
     Json,
@@ -10,7 +10,9 @@ use axum::{
 };
 use axum::response::sse::{Event, Sse};
 use backend::runner::RunStatus;
-use backend::storage::{generated_config_path, list_profiles, load_profile, load_settings};
+use backend::storage::{
+    generated_config_path, list_profiles, load_packages, load_profile, load_settings, save_profile,
+};
 use std::path::PathBuf;
 use tokio_stream::{StreamExt, wrappers::BroadcastStream};
 
@@ -97,7 +99,7 @@ pub(crate) async fn start_profile(
     settings: &backend::storage::AppSettings,
     profile_id: &str,
 ) -> Result<(), String> {
-    let profile = load_profile(profile_id).await?;
+    let mut profile = load_profile(profile_id).await?;
 
     let server_work_dir = effective_value(
         &profile.reforger_server_work_dir_override,
@@ -106,7 +108,20 @@ pub(crate) async fn start_profile(
     let config_path = generated_config_path(server_work_dir, &profile.profile_id);
 
     if tokio::fs::metadata(&config_path).await.is_err() {
-        return Err("generated config not found".to_string());
+        let packages = load_packages().await?;
+        let config_value = generate_config_for_profile(&profile, settings, &packages)?;
+        let config_json = serde_json::to_string_pretty(&config_value)
+            .map_err(|err| format!("failed to serialize config: {err}"))?;
+        if let Some(parent) = config_path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|err| format!("failed to create config dir: {err}"))?;
+        }
+        tokio::fs::write(&config_path, &config_json)
+            .await
+            .map_err(|err| format!("failed to write config: {err}"))?;
+        profile.generated_config_path = Some(config_path.to_string_lossy().to_string());
+        save_profile(&profile).await?;
     }
 
     let profile_dir_base =
