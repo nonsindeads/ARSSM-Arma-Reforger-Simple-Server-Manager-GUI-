@@ -131,6 +131,7 @@ pub fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<
 pub fn render_profile_edit(
     profile: &ServerProfile,
     packages: &[ModPackage],
+    settings: &backend::storage::AppSettings,
     tab: Option<&str>,
     message: Option<&str>,
 ) -> String {
@@ -326,7 +327,7 @@ pub fn render_profile_edit(
         profile_dir_base = html_escape::encode_text(profile.profile_dir_base_override.as_deref().unwrap_or("")),
     );
 
-    let overrides_content = render_profile_overrides_form(profile);
+    let overrides_content = render_profile_overrides_form(profile, settings);
 
     let content = format!(
         r#"<h1 class="h3 mb-3">Edit Profile</h1>
@@ -356,25 +357,19 @@ pub fn render_profile_edit(
     )
 }
 
-pub fn render_profile_overrides_form(profile: &ServerProfile) -> String {
-    let overrides = if profile.server_json_overrides.is_object() {
-        profile.server_json_overrides.clone()
+pub fn render_profile_overrides_form(
+    profile: &ServerProfile,
+    settings: &backend::storage::AppSettings,
+) -> String {
+    let baseline = if settings.server_json_defaults.is_object() {
+        settings.server_json_defaults.clone()
+    } else if let Ok(value) = serde_json::from_str(backend::config_gen::baseline_config()) {
+        value
     } else {
         serde_json::Value::Object(serde_json::Map::new())
     };
 
-    let fields = if overrides.is_object()
-        && !overrides
-            .as_object()
-            .map(|map| map.is_empty())
-            .unwrap_or(true)
-    {
-        flatten_defaults(&overrides)
-    } else if let Ok(value) = serde_json::from_str(backend::config_gen::baseline_config()) {
-        flatten_defaults(&value)
-    } else {
-        Vec::new()
-    };
+    let fields = flatten_defaults(&baseline);
     let mut rows = String::new();
     for field in fields {
         let enabled = profile

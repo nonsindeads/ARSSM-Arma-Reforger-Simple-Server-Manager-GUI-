@@ -52,7 +52,7 @@ pub async fn profile_detail(
 }
 
 pub async fn edit_profile_page(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
     axum::extract::Query(query): axum::extract::Query<ProfileTabQuery>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -62,16 +62,20 @@ pub async fn edit_profile_page(
     let packages = load_packages()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     Ok(Html(render_profile_edit(
         &profile,
         &packages,
+        &settings,
         query.tab.as_deref(),
         None,
     )))
 }
 
 pub async fn save_profile_edit(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
     Form(form): Form<EditProfileForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -81,11 +85,15 @@ pub async fn save_profile_edit(
     let packages = load_packages()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let settings = load_settings(&state.settings_path)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if form.display_name.trim().is_empty() || form.workshop_url.trim().is_empty() {
         return Ok(Html(render_profile_edit(
             &profile,
             &packages,
+            &settings,
             Some("general"),
             Some("Display name and workshop URL are required."),
         )));
@@ -104,6 +112,7 @@ pub async fn save_profile_edit(
     Ok(Html(render_profile_edit(
         &profile,
         &packages,
+        &settings,
         Some("general"),
         Some("Profile updated."),
     )))
@@ -117,6 +126,9 @@ pub async fn update_profile_optional_packages(
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
     let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let settings = load_settings(&settings_path())
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
@@ -133,6 +145,7 @@ pub async fn update_profile_optional_packages(
     Ok(Html(render_profile_edit(
         &profile,
         &packages,
+        &settings,
         Some("general"),
         Some("Optional packages updated."),
     )))
@@ -158,7 +171,7 @@ pub async fn delete_profile_action(
 }
 
 pub async fn save_profile_paths(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(profile_id): Path<String>,
     Form(form): Form<ProfilePathsForm>,
 ) -> Result<Html<String>, (StatusCode, String)> {
@@ -166,6 +179,9 @@ pub async fn save_profile_paths(
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
     let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
@@ -181,6 +197,7 @@ pub async fn save_profile_paths(
     Ok(Html(render_profile_edit(
         &profile,
         &packages,
+        &settings,
         Some("paths"),
         Some("Profile paths saved."),
     )))
@@ -206,6 +223,7 @@ pub async fn save_profile_overrides(
             return Ok(Html(render_profile_edit(
                 &profile,
                 &packages,
+                &settings,
                 Some("overrides"),
                 Some(&err),
             )));
@@ -221,6 +239,7 @@ pub async fn save_profile_overrides(
     Ok(Html(render_profile_edit(
         &profile,
         &packages,
+        &settings,
         Some("overrides"),
         Some("Overrides saved."),
     )))
