@@ -2261,8 +2261,8 @@ fn render_packages_page(
     for entry in mods {
         mod_rows.push_str(&format!(
             r#"<tr>
-              <td>{mod_id}</td>
-              <td>{name}</td>
+              <td class="arssm-text">{mod_id}</td>
+              <td class="arssm-text">{name}</td>
               <td class="d-flex gap-2">
                 <form method="post" action="/packages/mods/{mod_id}/edit" class="d-flex gap-2">
                   <input type="hidden" name="mod_id" value="{mod_id}">
@@ -2291,8 +2291,8 @@ fn render_packages_page(
         };
         package_rows.push_str(&format!(
             r#"<tr>
-              <td>{name}</td>
-              <td>{mods}</td>
+              <td class="arssm-text">{name}</td>
+              <td class="arssm-text">{mods}</td>
               <td class="d-flex gap-2">
                 <a class="btn btn-sm btn-arssm-secondary" href="/packages/packs/{id}">Edit</a>
                 <form method="post" action="/packages/packs/{id}/delete">
