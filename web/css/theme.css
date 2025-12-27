@@ -92,6 +92,10 @@ body {
   background: var(--arssm-bg);
 }
 
+.arssm-table thead th {
+  color: var(--arssm-text);
+}
+
 .arssm-table tbody tr:hover > * {
   background: var(--arssm-surface-2);
 }
