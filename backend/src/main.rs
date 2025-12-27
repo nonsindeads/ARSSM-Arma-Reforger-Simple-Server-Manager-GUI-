@@ -1783,10 +1783,19 @@ fn render_new_profile_resolve(
     let mut scenario_options = String::new();
     let mut dependency_ids = String::new();
     let mut root_id = String::new();
+    let mut dependency_list = String::new();
+    let mut dependency_count = 0usize;
     let mut errors = String::new();
     if let Some(result) = resolved {
         root_id = result.root_id.clone();
         dependency_ids = result.dependency_ids.join(",");
+        for dep_id in result.dependency_ids.iter() {
+            dependency_list.push_str(&format!(
+                "<li>{}</li>",
+                html_escape::encode_text(dep_id)
+            ));
+        }
+        dependency_count = result.dependency_ids.len();
         if result.scenarios.is_empty() {
             scenario_options.push_str("<option value=\"\">No scenarios found</option>");
         } else {
@@ -1819,6 +1828,12 @@ fn render_new_profile_resolve(
                 {scenario_options}
               </select>
             </div>
+            <p class="mb-1"><strong>Root mod ID:</strong> {root_id_display}</p>
+            <p class="text-muted mb-2">{dependency_count} dependencies resolved.</p>
+            <details>
+              <summary>Show dependency list</summary>
+              <ul>{dependency_list}</ul>
+            </details>
           </div>
           <div class="card card-body mb-4">
             <h2 class="h5">Schritt 3: Mod-Pakete</h2>
@@ -1837,8 +1852,11 @@ fn render_new_profile_resolve(
         </div>"##,
         notice = notice,
         root_id = html_escape::encode_text(&root_id),
+        root_id_display = html_escape::encode_text(&root_id),
         dependency_ids = html_escape::encode_text(&dependency_ids),
         scenario_options = scenario_options,
+        dependency_count = dependency_count,
+        dependency_list = if dependency_list.is_empty() { "<li>No dependencies resolved.</li>".to_string() } else { dependency_list },
         errors = errors,
     )
 }
@@ -1888,10 +1906,20 @@ fn render_workshop_panel(
     resolved: Option<&backend::workshop::WorkshopResolveResult>,
     message: Option<&str>,
 ) -> String {
-    let (scenarios, dependency_ids, errors) = if let Some(result) = resolved {
-        (result.scenarios.clone(), result.dependency_ids.clone(), result.errors.clone())
+    let (root_id, scenarios, dependency_ids, errors) = if let Some(result) = resolved {
+        (
+            Some(result.root_id.clone()),
+            result.scenarios.clone(),
+            result.dependency_ids.clone(),
+            result.errors.clone(),
+        )
     } else {
-        (Vec::new(), profile.dependency_mod_ids.clone(), Vec::new())
+        (
+            profile.root_mod_id.clone(),
+            Vec::new(),
+            profile.dependency_mod_ids.clone(),
+            Vec::new(),
+        )
     };
 
     let mut scenario_options = String::new();
@@ -1936,6 +1964,9 @@ fn render_workshop_panel(
     };
 
     let dependency_count = dependency_ids.len();
+    let root_display = root_id
+        .as_deref()
+        .unwrap_or("Not resolved yet");
     let mut dependency_list = String::new();
     for id in dependency_ids {
         dependency_list.push_str(&format!("<li>{}</li>", html_escape::encode_text(&id)));
@@ -1981,6 +2012,7 @@ fn render_workshop_panel(
 
         <div class="card card-body mb-4">
           <h2 class="h5">Dependencies</h2>
+          <p class="mb-1"><strong>Root mod ID:</strong> <span class="arssm-text">{root_display}</span></p>
           <p class="text-muted">{dependency_count} dependencies resolved.</p>
           <details>
             <summary>Show dependency list</summary>
@@ -2000,6 +2032,7 @@ fn render_workshop_panel(
         optional_mods = html_escape::encode_text(&optional_mods),
         dependency_count = dependency_count,
         dependency_list = dependency_list,
+        root_display = html_escape::encode_text(root_display),
         error_list = error_list,
     )
 }
@@ -2411,12 +2444,24 @@ fn generate_config_for_profile(
         .ok_or_else(|| "selected_scenario_id_path not set".to_string())?;
 
     let mut mod_ids = Vec::new();
+    let root_mod_id = profile
+        .root_mod_id
+        .clone()
+        .or_else(|| backend::workshop::extract_workshop_id_from_url(&profile.workshop_url))
+        .ok_or_else(|| "root_mod_id not set".to_string())?;
+    mod_ids.push(root_mod_id);
     mod_ids.extend(profile.dependency_mod_ids.clone());
     mod_ids.extend(profile.optional_mod_ids.clone());
 
     let mut config = generate_server_config(scenario, &mod_ids, Some(&profile.display_name))?;
     apply_default_server_json_settings(&mut config, settings);
     apply_profile_overrides(&mut config, profile)?;
+    backend::config_gen::apply_game_overrides(
+        &mut config,
+        scenario,
+        &mod_ids,
+        Some(&profile.display_name),
+    )?;
 
     Ok(config)
 }

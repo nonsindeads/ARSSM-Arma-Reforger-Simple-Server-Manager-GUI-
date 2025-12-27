@@ -15,7 +15,18 @@ pub fn generate_server_config(
     let mut root: Value = serde_json::from_str(BASELINE_CONFIG)
         .map_err(|err| format!("failed to parse baseline config: {err}"))?;
 
-    let game = root
+    apply_game_overrides(&mut root, scenario_id, mod_ids, display_name)?;
+
+    Ok(root)
+}
+
+pub fn apply_game_overrides(
+    config: &mut Value,
+    scenario_id: &str,
+    mod_ids: &[String],
+    display_name: Option<&str>,
+) -> Result<(), String> {
+    let game = config
         .get_mut("game")
         .and_then(|value| value.as_object_mut())
         .ok_or_else(|| "baseline config missing game object".to_string())?;
@@ -39,8 +50,7 @@ pub fn generate_server_config(
         .collect::<Vec<_>>();
 
     game.insert("mods".to_string(), Value::Array(mods));
-
-    Ok(root)
+    Ok(())
 }
 
 fn dedupe_mod_ids(mod_ids: &[String]) -> Vec<String> {
