@@ -401,6 +401,7 @@ struct NewProfileCreateForm {
     root_mod_id: Option<String>,
     dependency_mod_ids: Option<String>,
     selected_scenario_id_path: Option<String>,
+    scenario_ids: Option<String>,
     optional_mod_ids: Option<String>,
 }
 
@@ -438,6 +439,7 @@ async fn new_profile_create(
         workshop_url: form.workshop_url.trim().to_string(),
         root_mod_id: Some(root_mod_id),
         selected_scenario_id_path: Some(selected_scenario),
+        scenarios: parse_scenario_ids(form.scenario_ids.as_deref().unwrap_or("")),
         dependency_mod_ids: parse_mod_ids(form.dependency_mod_ids.as_deref().unwrap_or("")),
         optional_mod_ids: parse_mod_ids(form.optional_mod_ids.as_deref().unwrap_or("")),
         load_session_save: false,
@@ -1516,7 +1518,7 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
           <dt class="col-sm-3">Workshop URL</dt>
           <dd class="col-sm-9 arssm-text">{url}</dd>
           <dt class="col-sm-3">Selected scenario</dt>
-          <dd class="col-sm-9">{scenario}</dd>
+          <dd class="col-sm-9">{scenario_name}</dd>
           <dt class="col-sm-3">Active</dt>
           <dd class="col-sm-9">{active_badge}</dd>
         </dl>
@@ -1530,11 +1532,10 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
         url = html_escape::encode_text(&profile.workshop_url),
-        scenario = html_escape::encode_text(
-            profile
-                .selected_scenario_id_path
-                .as_deref()
-                .unwrap_or("Not selected")
+        scenario_name = html_escape::encode_text(
+            scenario_display_name(profile.selected_scenario_id_path.as_deref())
+                .unwrap_or_else(|| "Not selected".to_string())
+                .as_str()
         ),
         active_badge = active_badge,
     );
@@ -1783,12 +1784,14 @@ fn render_new_profile_resolve(
     let mut scenario_options = String::new();
     let mut dependency_ids = String::new();
     let mut root_id = String::new();
+    let mut scenario_ids = String::new();
     let mut dependency_list = String::new();
     let mut dependency_count = 0usize;
     let mut errors = String::new();
     if let Some(result) = resolved {
         root_id = result.root_id.clone();
         dependency_ids = result.dependency_ids.join(",");
+        scenario_ids = result.scenarios.join("\n");
         for dep_id in result.dependency_ids.iter() {
             dependency_list.push_str(&format!(
                 "<li>{}</li>",
@@ -1822,6 +1825,7 @@ fn render_new_profile_resolve(
             {notice}
             <input type="hidden" name="root_mod_id" value="{root_id}">
             <input type="hidden" name="dependency_mod_ids" value="{dependency_ids}">
+            <input type="hidden" name="scenario_ids" value="{scenario_ids}">
             <div class="mb-3">
               <label class="form-label" for="selected_scenario_id_path">Scenario</label>
               <select class="form-select arssm-input" id="selected_scenario_id_path" name="selected_scenario_id_path">
@@ -1854,6 +1858,7 @@ fn render_new_profile_resolve(
         root_id = html_escape::encode_text(&root_id),
         root_id_display = html_escape::encode_text(&root_id),
         dependency_ids = html_escape::encode_text(&dependency_ids),
+        scenario_ids = html_escape::encode_text(&scenario_ids),
         scenario_options = scenario_options,
         dependency_count = dependency_count,
         dependency_list = if dependency_list.is_empty() { "<li>No dependencies resolved.</li>".to_string() } else { dependency_list },
@@ -1916,7 +1921,7 @@ fn render_workshop_panel(
     } else {
         (
             profile.root_mod_id.clone(),
-            Vec::new(),
+            profile.scenarios.clone(),
             profile.dependency_mod_ids.clone(),
             Vec::new(),
         )
@@ -2548,6 +2553,7 @@ async fn resolve_and_update_profile(
     let result = state.workshop_resolver.resolve(&profile.workshop_url, 5).await?;
     profile.root_mod_id = Some(result.root_id.clone());
     profile.dependency_mod_ids = result.dependency_ids.clone();
+    profile.scenarios = result.scenarios.clone();
     profile.last_resolved_at = Some(now_timestamp());
     save_profile(profile).await?;
     Ok(result)
@@ -2594,6 +2600,15 @@ fn parse_mod_ids(input: &str) -> Vec<String> {
         .collect()
 }
 
+fn parse_scenario_ids(input: &str) -> Vec<String> {
+    input
+        .lines()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_string())
+        .collect()
+}
+
 fn normalize_optional_path(input: &str) -> Option<String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -2628,6 +2643,19 @@ fn format_duration(started_at: u64) -> String {
     let minutes = (total % 3600) / 60;
     let seconds = total % 60;
     format!("{hours}h {minutes}m {seconds}s")
+}
+
+fn scenario_display_name(path: Option<&str>) -> Option<String> {
+    let path = path?;
+    let marker = "Missions/";
+    let start = path.find(marker).map(|idx| idx + marker.len())?;
+    let name_with_ext = &path[start..];
+    let name = name_with_ext.strip_suffix(".conf").unwrap_or(name_with_ext);
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 fn apply_default_server_json(settings: &mut AppSettings) {

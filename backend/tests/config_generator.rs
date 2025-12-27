@@ -39,6 +39,7 @@ fn applies_settings_defaults_and_profile_overrides() {
         workshop_url: "url".to_string(),
         root_mod_id: None,
         selected_scenario_id_path: Some("{TEST}Missions/Example.conf".to_string()),
+        scenarios: Vec::new(),
         dependency_mod_ids: Vec::new(),
         optional_mod_ids: Vec::new(),
         load_session_save: false,

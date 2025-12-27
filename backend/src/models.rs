@@ -10,6 +10,8 @@ pub struct ServerProfile {
     #[serde(default)]
     pub selected_scenario_id_path: Option<String>,
     #[serde(default)]
+    pub scenarios: Vec<String>,
+    #[serde(default)]
     pub dependency_mod_ids: Vec<String>,
     #[serde(default)]
     pub optional_mod_ids: Vec<String>,
