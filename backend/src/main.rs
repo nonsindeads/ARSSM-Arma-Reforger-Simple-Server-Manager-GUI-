@@ -2193,7 +2193,7 @@ fn render_packages_page(
         ));
     }
     if package_rows.is_empty() {
-        package_rows.push_str("<tr><td colspan=\"3\">No packages defined.</td></tr>");
+        package_rows.push_str("<tr><td colspan=\"3\" class=\"text-muted\">No packages defined.</td></tr>");
     }
 
     let content = format!(
