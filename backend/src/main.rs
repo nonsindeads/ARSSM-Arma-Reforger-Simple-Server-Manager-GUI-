@@ -2845,14 +2845,11 @@ async fn resolve_and_update_profile(
 }
 
 fn render_hidden_mod_ids(mod_ids: &[String]) -> String {
-    let mut fields = String::new();
-    for id in mod_ids {
-        fields.push_str(&format!(
-            r#"<input type="hidden" name="mod_ids" value="{id}">"#,
-            id = html_escape::encode_text(id),
-        ));
-    }
-    fields
+    let joined = mod_ids.join(",");
+    format!(
+        r#"<input type="hidden" name="mod_ids" value="{value}">"#,
+        value = html_escape::encode_text(&joined),
+    )
 }
 
 fn update_mod_selection(
