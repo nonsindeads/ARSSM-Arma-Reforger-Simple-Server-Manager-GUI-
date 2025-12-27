@@ -6,7 +6,7 @@ use axum::{Form, extract::State, http::StatusCode, response::Html};
 use backend::storage::{list_profiles, load_packages, load_settings};
 use minijinja::context;
 use serde::Deserialize;
-use sysinfo::{Pid, ProcessExt, System, SystemExt};
+use sysinfo::{Pid, System};
 
 pub async fn dashboard_page(
     State(state): State<AppState>,
