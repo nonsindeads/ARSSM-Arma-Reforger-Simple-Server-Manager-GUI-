@@ -2325,15 +2325,9 @@ fn render_packages_page(
 
     let mut package_rows = String::new();
     for package in packages {
-        let mod_list = if package.mod_ids.is_empty() {
-            "None".to_string()
-        } else {
-            package.mod_ids.join(", ")
-        };
         package_rows.push_str(&format!(
             r#"<tr>
               <td class="arssm-text">{name}</td>
-              <td class="arssm-text">{mods}</td>
               <td class="d-flex gap-2">
                 <a class="btn btn-sm btn-arssm-secondary" href="/packages/packs/{id}">Edit</a>
                 <form method="post" action="/packages/packs/{id}/delete">
@@ -2343,7 +2337,6 @@ fn render_packages_page(
             </tr>"#,
             id = html_escape::encode_text(&package.package_id),
             name = html_escape::encode_text(&package.name),
-            mods = html_escape::encode_text(&mod_list),
         ));
     }
     if package_rows.is_empty() {
@@ -2395,7 +2388,6 @@ fn render_packages_page(
                 <thead>
                   <tr>
                     <th>Package</th>
-                    <th>Mods</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
