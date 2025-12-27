@@ -156,11 +156,11 @@ fn health_html() -> &'static str {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ARSSM Health</title>
     <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      body { font-family: "Rajdhani", "Segoe UI", sans-serif; margin: 2rem; color: var(--arssm-text); background: var(--arssm-bg); }
       label { display: block; margin-bottom: 0.5rem; }
-      input { width: 100%; max-width: 720px; padding: 0.5rem; }
-      button { margin-top: 0.75rem; padding: 0.5rem 1rem; }
-      pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; }
+      input { width: 100%; max-width: 720px; padding: 0.5rem; background: var(--arssm-surface-2); border: 1px solid var(--arssm-border); color: var(--arssm-text); }
+      button { margin-top: 0.75rem; padding: 0.5rem 1rem; background: var(--arssm-accent); border: 1px solid var(--arssm-accent); color: var(--arssm-bg); }
+      pre { background: var(--arssm-surface-2); padding: 1rem; white-space: pre-wrap; border: 1px solid var(--arssm-border); }
     </style>
   </head>
   <body>
