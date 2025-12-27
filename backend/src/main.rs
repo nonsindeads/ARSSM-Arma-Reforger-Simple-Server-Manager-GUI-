@@ -171,7 +171,7 @@ fn health_html() -> &'static str {
         <p class="text-muted">Status: ok</p>
         <label class="form-label text-muted" for="workshop-url">Workshop URL</label>
         <input class="form-control arssm-input" id="workshop-url" type="text" value="https://reforger.armaplatform.com/workshop/595F2BF2F44836FB-RHS-StatusQuo">
-        <button class="btn btn-primary mt-3" id="resolve">Resolve</button>
+        <button class="btn btn-arssm-primary mt-3" id="resolve">Resolve</button>
         <h2 class="mt-4">Result</h2>
         <pre class="arssm-log p-3" id="output">Waiting for input.</pre>
       </div>
@@ -1006,10 +1006,16 @@ async fn header_status_partial(
     } else {
         "stopped".to_string()
     };
+    let status_class = if status.running {
+        "status-pill status-pill--running"
+    } else {
+        "status-pill status-pill--stopped"
+    };
 
     let context = context! {
         datetime => datetime,
         run_status => run_status,
+        status_class => status_class,
         uptime => uptime,
         cpu => "n/a",
         ram => "n/a",
@@ -1305,12 +1311,12 @@ fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: Opti
             <label class="form-label" for="profile_dir_base">Profile base directory</label>
             <input class="form-control arssm-input" id="profile_dir_base" name="profile_dir_base" value="{profile_dir_base}">
           </div>
-          <button class="btn btn-primary" type="submit">Save</button>
+          <button class="btn btn-arssm-primary" type="submit">Save</button>
         </form>
         <hr>
         <h2 class="h5">SteamCMD Update</h2>
         <p class="text-muted">Placeholder action for MVP2.</p>
-        <button class="btn btn-outline-primary" id="steamcmd-update">Run update</button>
+        <button class="btn btn-arssm-secondary" id="steamcmd-update">Run update</button>
         <p class="mt-2" id="steamcmd-status"></p>
         <script>
           document.getElementById('steamcmd-update').addEventListener('click', async () => {{
@@ -1418,7 +1424,7 @@ fn render_defaults_form(settings: &AppSettings) -> String {
               </tbody>
             </table>
           </div>
-          <button class="btn btn-primary" type="submit">Save defaults</button>
+          <button class="btn btn-arssm-primary" type="submit">Save defaults</button>
         </form>"#,
         rows = rows,
         disabled_summary = disabled_summary,
@@ -1450,7 +1456,7 @@ fn render_profiles_page(
               <td class="arssm-text">{url}</td>
               <td>
                 <form method="post" action="/server/{id}/activate">
-                  <button class="btn btn-sm btn-outline-secondary" type="submit">Set active</button>
+                  <button class="btn btn-sm btn-arssm-secondary" type="submit">Set active</button>
                 </form>
               </td>
             </tr>"#,
@@ -1468,7 +1474,7 @@ fn render_profiles_page(
     let content = format!(
         r#"<h1 class="h3 mb-3">Server / Profile</h1>
         {notice}
-        <a class="btn btn-primary mb-3" href="/server/new">Neues Profil</a>
+        <a class="btn btn-arssm-primary mb-3" href="/server/new">Neues Profil</a>
         <table class="table table-striped arssm-table">
           <thead>
             <tr>
@@ -1514,13 +1520,13 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
           <dt class="col-sm-3">Active</dt>
           <dd class="col-sm-9">{active_badge}</dd>
         </dl>
-        <a class="btn btn-outline-primary me-2" href="/server/{id}/workshop">Workshop resolve</a>
-        <a class="btn btn-primary me-2" href="/server/{id}/config-preview">Config preview</a>
-        <a class="btn btn-outline-secondary me-2" href="/server/{id}/edit">Edit</a>
+        <a class="btn btn-arssm-secondary me-2" href="/server/{id}/workshop">Workshop resolve</a>
+        <a class="btn btn-arssm-primary me-2" href="/server/{id}/config-preview">Config preview</a>
+        <a class="btn btn-arssm-secondary me-2" href="/server/{id}/edit">Edit</a>
         <form class="d-inline" method="post" action="/server/{id}/activate">
-          <button class="btn btn-outline-secondary" type="submit">Set active</button>
+          <button class="btn btn-arssm-secondary" type="submit">Set active</button>
         </form>
-        <a class="btn btn-outline-secondary ms-2" href="/server">Back to profiles</a>"#,
+        <a class="btn btn-arssm-secondary ms-2" href="/server">Back to profiles</a>"#,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
         url = html_escape::encode_text(&profile.workshop_url),
@@ -1573,12 +1579,12 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
             <input class="form-control arssm-input" id="workshop_url" name="workshop_url" value="{url}">
           </div>
           <div class="d-flex gap-2">
-            <button class="btn btn-primary" type="submit">Save</button>
-            <a class="btn btn-outline-secondary" href="/server/{id}">Cancel</a>
+            <button class="btn btn-arssm-primary" type="submit">Save</button>
+            <a class="btn btn-arssm-secondary" href="/server/{id}">Cancel</a>
           </div>
         </form>
         <form method="post" action="/server/{id}/delete">
-          <button class="btn btn-outline-danger" type="submit">Delete profile</button>
+          <button class="btn btn-arssm-danger" type="submit">Delete profile</button>
         </form>"#,
         id = html_escape::encode_text(&profile.profile_id),
         name = html_escape::encode_text(&profile.display_name),
@@ -1601,7 +1607,7 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
             <label class="form-label" for="mod_path_override">Mod-Pfad</label>
             <input class="form-control arssm-input" id="mod_path_override" name="mod_path_override" value="{mod_path}">
           </div>
-          <button class="btn btn-primary" type="submit">Save paths</button>
+          <button class="btn btn-arssm-primary" type="submit">Save paths</button>
         </form>"#,
         id = html_escape::encode_text(&profile.profile_id),
         server_path = html_escape::encode_text(profile.server_path_override.as_deref().unwrap_or("")),
@@ -1704,7 +1710,7 @@ fn render_profile_overrides_form(profile: &ServerProfile) -> String {
               </tbody>
             </table>
           </div>
-          <button class="btn btn-primary" type="submit">Save overrides</button>
+          <button class="btn btn-arssm-primary" type="submit">Save overrides</button>
         </form>"#,
         id = html_escape::encode_text(&profile.profile_id),
         rows = rows,
@@ -1729,7 +1735,7 @@ fn render_new_profile_wizard(message: Option<&str>) -> String {
               <label class="form-label" for="workshop_url">Workshop URL</label>
               <input class="form-control arssm-input" id="workshop_url" name="workshop_url">
             </div>
-            <button type="button" class="btn btn-outline-secondary" hx-post="/server/new/resolve" hx-target="#wizard-resolve" hx-swap="outerHTML" hx-include="#workshop_url">Workshop laden</button>
+            <button type="button" class="btn btn-arssm-secondary" hx-post="/server/new/resolve" hx-target="#wizard-resolve" hx-swap="outerHTML" hx-include="#workshop_url">Workshop laden</button>
           </div>
 
           <div id="wizard-resolve">
@@ -1748,8 +1754,8 @@ fn render_new_profile_wizard(message: Option<&str>) -> String {
           </div>
 
           <div class="d-flex gap-2">
-            <button class="btn btn-primary" type="submit">Profil erstellen</button>
-            <a class="btn btn-outline-secondary" href="/server">Abbrechen</a>
+            <button class="btn btn-arssm-primary" type="submit">Profil erstellen</button>
+            <a class="btn btn-arssm-secondary" href="/server">Abbrechen</a>
           </div>
         </form>"##,
         notice = notice,
@@ -1853,8 +1859,8 @@ fn render_workshop_page(
           <p class="mb-1"><strong>Profile:</strong> {name}</p>
           <p class="mb-3"><strong>Workshop URL:</strong> <span class="arssm-text">{url}</span></p>
           <form method="post" action="/server/{id}/workshop/resolve" hx-post="/server/{id}/workshop/resolve" hx-target="#workshop-resolve-panel" hx-swap="outerHTML">
-            <button class="btn btn-primary" type="submit">Resolve</button>
-            <a class="btn btn-outline-secondary ms-2" href="/server/{id}/config-preview">Go to Config Preview</a>
+            <button class="btn btn-arssm-primary" type="submit">Resolve</button>
+            <a class="btn btn-arssm-secondary ms-2" href="/server/{id}/config-preview">Go to Config Preview</a>
           </form>
         </div>
         {panel}"##,
@@ -1967,8 +1973,8 @@ fn render_workshop_panel(
               <textarea class="form-control arssm-input" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
             </div>
             <div class="d-flex gap-2">
-              <button class="btn btn-success" type="submit">Save selection</button>
-              <a class="btn btn-outline-secondary" href="/server/{id}/config-preview">Config Preview</a>
+              <button class="btn btn-arssm-primary" type="submit">Save selection</button>
+              <a class="btn btn-arssm-secondary" href="/server/{id}/config-preview">Config Preview</a>
             </div>
           </form>
         </div>
@@ -2007,15 +2013,15 @@ fn render_config_preview(profile: &ServerProfile, preview: &str, message: Option
         </div>
         <div class="d-flex gap-2">
           <form method="post" action="/server/{id}/config-write">
-            <button class="btn btn-primary" type="submit">Write file</button>
+            <button class="btn btn-arssm-primary" type="submit">Write file</button>
           </form>
-          <button class="btn btn-outline-secondary" hx-post="/server/{id}/config-preview" hx-target="#config-preview" hx-swap="innerHTML">Resolve & Regenerate</button>
+          <button class="btn btn-arssm-secondary" hx-post="/server/{id}/config-preview" hx-target="#config-preview" hx-swap="innerHTML">Resolve & Regenerate</button>
           <form method="post" action="/server/{id}/config-regenerate">
-            <button class="btn btn-outline-secondary" type="submit">Regenerate (full)</button>
+            <button class="btn btn-arssm-secondary" type="submit">Regenerate (full)</button>
           </form>
         </div>
         <div class="mt-3">
-          <a class="btn btn-outline-secondary" href="/server/{id}">Back to profile</a>
+          <a class="btn btn-arssm-secondary" href="/server/{id}">Back to profile</a>
         </div>"##,
         name = html_escape::encode_text(&profile.display_name),
         id = html_escape::encode_text(&profile.profile_id),
@@ -2069,8 +2075,8 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
             </div>
             <div class="col-md-6">
               <div class="d-flex gap-2">
-                <button class="btn btn-success" id="start-btn">Start</button>
-                <button class="btn btn-danger" id="stop-btn">Stop</button>
+                <button class="btn btn-arssm-primary" id="start-btn">Start</button>
+                <button class="btn btn-arssm-danger" id="stop-btn">Stop</button>
               </div>
             </div>
           </div>
@@ -2154,10 +2160,10 @@ fn render_packages_page(
                 <form method="post" action="/packages/mods/{mod_id}/edit" class="d-flex gap-2">
                   <input type="hidden" name="mod_id" value="{mod_id}">
                   <input class="form-control form-control-sm arssm-input" name="name" value="{name}">
-                  <button class="btn btn-sm btn-outline-secondary" type="submit">Save</button>
+                  <button class="btn btn-sm btn-arssm-secondary" type="submit">Save</button>
                 </form>
                 <form method="post" action="/packages/mods/{mod_id}/delete">
-                  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                  <button class="btn btn-sm btn-arssm-danger" type="submit">Delete</button>
                 </form>
               </td>
             </tr>"#,
@@ -2181,9 +2187,9 @@ fn render_packages_page(
               <td>{name}</td>
               <td>{mods}</td>
               <td class="d-flex gap-2">
-                <a class="btn btn-sm btn-outline-secondary" href="/packages/packs/{id}">Edit</a>
+                <a class="btn btn-sm btn-arssm-secondary" href="/packages/packs/{id}">Edit</a>
                 <form method="post" action="/packages/packs/{id}/delete">
-                  <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+                  <button class="btn btn-sm btn-arssm-danger" type="submit">Delete</button>
                 </form>
               </td>
             </tr>"#,
@@ -2211,7 +2217,7 @@ fn render_packages_page(
                   <input class="form-control arssm-input" name="name" placeholder="Name">
                 </div>
                 <div class="col-md-2 d-grid">
-                  <button class="btn btn-primary" type="submit">Add</button>
+                  <button class="btn btn-arssm-primary" type="submit">Add</button>
                 </div>
               </form>
               <table class="table table-sm arssm-table">
@@ -2238,7 +2244,7 @@ fn render_packages_page(
                 <select class="form-select arssm-input" name="mod_ids" multiple>
                   {package_options}
                 </select>
-                <button class="btn btn-primary mt-2" type="submit">Create</button>
+                <button class="btn btn-arssm-primary mt-2" type="submit">Create</button>
               </form>
               <table class="table table-sm arssm-table">
                 <thead>
@@ -2282,12 +2288,12 @@ fn render_package_edit_page(
             </select>
           </div>
           <div class="d-flex gap-2">
-            <button class="btn btn-primary" type="submit">Save</button>
-            <a class="btn btn-outline-secondary" href="/packages">Back</a>
+            <button class="btn btn-arssm-primary" type="submit">Save</button>
+            <a class="btn btn-arssm-secondary" href="/packages">Back</a>
           </div>
         </form>
         <form method="post" action="/packages/packs/{id}/delete">
-          <button class="btn btn-outline-danger" type="submit">Delete package</button>
+          <button class="btn btn-arssm-danger" type="submit">Delete package</button>
         </form>"#,
         id = html_escape::encode_text(&package.package_id),
         name = html_escape::encode_text(&package.name),
@@ -2325,15 +2331,15 @@ fn render_server_status_card(
           <div class="d-flex flex-wrap gap-2">
             <form method="post" action="/partials/server-status-card" hx-post="/partials/server-status-card" hx-target="#server-status-card" hx-swap="outerHTML">
               <input type="hidden" name="action" value="start">
-              <button class="btn btn-sm btn-success" type="submit">Start</button>
+              <button class="btn btn-sm btn-arssm-primary" type="submit">Start</button>
             </form>
             <form method="post" action="/partials/server-status-card" hx-post="/partials/server-status-card" hx-target="#server-status-card" hx-swap="outerHTML">
               <input type="hidden" name="action" value="stop">
-              <button class="btn btn-sm btn-danger" type="submit">Stop</button>
+              <button class="btn btn-sm btn-arssm-danger" type="submit">Stop</button>
             </form>
             <form method="post" action="/partials/server-status-card" hx-post="/partials/server-status-card" hx-target="#server-status-card" hx-swap="outerHTML">
               <input type="hidden" name="action" value="restart">
-              <button class="btn btn-sm btn-outline-secondary" type="submit">Restart</button>
+              <button class="btn btn-sm btn-arssm-secondary" type="submit">Restart</button>
             </form>
           </div>
         </div>"##,

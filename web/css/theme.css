@@ -156,30 +156,51 @@ textarea:focus {
   box-shadow: 0 0 0 0.2rem var(--arssm-focus);
 }
 
-.btn-primary {
+.btn-arssm-primary {
   background: var(--arssm-accent);
   border-color: var(--arssm-accent);
   color: #0b1220;
 }
 
-.btn-primary:hover {
+.btn-arssm-primary:hover {
   background: #fb8b2e;
   border-color: #fb8b2e;
+  color: #0b1220;
 }
 
-.btn-outline-secondary {
+.btn-arssm-primary:focus {
+  box-shadow: 0 0 0 0.2rem var(--arssm-focus);
+}
+
+.btn-arssm-secondary {
+  background: var(--arssm-surface);
   border-color: var(--arssm-border);
-  color: var(--arssm-muted);
-}
-
-.btn-outline-secondary:hover {
-  background: var(--arssm-hover);
   color: var(--arssm-text);
 }
 
-.btn-outline-danger {
-  border-color: var(--arssm-danger);
-  color: var(--arssm-danger);
+.btn-arssm-secondary:hover {
+  background: var(--arssm-surface-2);
+  color: var(--arssm-text);
+}
+
+.btn-arssm-secondary:focus {
+  box-shadow: 0 0 0 0.2rem var(--arssm-focus);
+}
+
+.btn-arssm-danger {
+  background: var(--arssm-surface);
+  border-color: var(--arssm-accent);
+  color: var(--arssm-accent);
+}
+
+.btn-arssm-danger:hover {
+  background: var(--arssm-hover);
+  border-color: var(--arssm-accent);
+  color: var(--arssm-accent);
+}
+
+.btn-arssm-danger:focus {
+  box-shadow: 0 0 0 0.2rem var(--arssm-focus);
 }
 
 .nav-tabs .nav-link {
@@ -204,9 +225,20 @@ textarea:focus {
   gap: 0.5rem;
   padding: 0.25rem 0.75rem;
   border-radius: 999px;
-  background: var(--arssm-hover);
-  color: var(--arssm-accent);
+  border: 1px solid var(--arssm-border);
+  background: var(--arssm-surface);
+  color: var(--arssm-muted);
   font-weight: 600;
+}
+
+.status-pill--stopped {
+  color: var(--arssm-muted);
+}
+
+.status-pill--running {
+  color: var(--arssm-accent);
+  border-color: var(--arssm-accent);
+  background: var(--arssm-hover);
 }
 
 pre {
