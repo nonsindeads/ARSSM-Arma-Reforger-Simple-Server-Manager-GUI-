@@ -16,6 +16,8 @@ pub struct ServerProfile {
     #[serde(default)]
     pub optional_mod_ids: Vec<String>,
     #[serde(default)]
+    pub optional_package_ids: Vec<String>,
+    #[serde(default)]
     pub load_session_save: bool,
     #[serde(default)]
     pub steamcmd_dir_override: Option<String>,

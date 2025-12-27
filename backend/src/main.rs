@@ -243,7 +243,15 @@ async fn edit_profile_page(
     let profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
-    Ok(Html(render_profile_edit(&profile, query.tab.as_deref(), None)))
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    Ok(Html(render_profile_edit(
+        &profile,
+        &packages,
+        query.tab.as_deref(),
+        None,
+    )))
 }
 
 #[derive(Deserialize)]
@@ -251,6 +259,9 @@ struct EditProfileForm {
     display_name: String,
     workshop_url: String,
     selected_scenario_id_path: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_mod_ids")]
+    optional_package_ids: Option<Vec<String>>,
+    optional_mod_ids: Option<String>,
 }
 
 async fn save_profile_edit(
@@ -260,10 +271,14 @@ async fn save_profile_edit(
     let mut profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     if form.display_name.trim().is_empty() || form.workshop_url.trim().is_empty() {
         return Ok(Html(render_profile_edit(
             &profile,
+            &packages,
             Some("general"),
             Some("Display name and workshop URL are required."),
         )));
@@ -282,6 +297,7 @@ async fn save_profile_edit(
         if selected.is_empty() {
             return Ok(Html(render_profile_edit(
                 &profile,
+                &packages,
                 Some("general"),
                 Some("Scenario selection is required."),
             )));
@@ -289,6 +305,7 @@ async fn save_profile_edit(
         if !profile.scenarios.iter().any(|value| value == &selected) {
             return Ok(Html(render_profile_edit(
                 &profile,
+                &packages,
                 Some("general"),
                 Some("Selected scenario is not in the resolved list."),
             )));
@@ -296,11 +313,19 @@ async fn save_profile_edit(
         profile.selected_scenario_id_path = Some(selected);
     }
 
+    profile.optional_package_ids = form.optional_package_ids.unwrap_or_default();
+    profile.optional_mod_ids = parse_mod_ids(form.optional_mod_ids.as_deref().unwrap_or(""));
+
     save_profile(&profile)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_profile_edit(&profile, Some("general"), Some("Profile updated."))))
+    Ok(Html(render_profile_edit(
+        &profile,
+        &packages,
+        Some("general"),
+        Some("Profile updated."),
+    )))
 }
 
 async fn delete_profile_action(
@@ -346,6 +371,9 @@ async fn save_profile_paths(
     let mut profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
     profile.steamcmd_dir_override = normalize_optional_path(&form.steamcmd_dir_override);
     profile.reforger_server_exe_override =
@@ -358,7 +386,12 @@ async fn save_profile_paths(
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
 
-    Ok(Html(render_profile_edit(&profile, Some("paths"), Some("Paths saved."))))
+    Ok(Html(render_profile_edit(
+        &profile,
+        &packages,
+        Some("paths"),
+        Some("Paths saved."),
+    )))
 }
 
 async fn save_profile_overrides(
@@ -369,6 +402,9 @@ async fn save_profile_overrides(
     let mut profile = load_profile(&profile_id)
         .await
         .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
     let mut settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
@@ -379,6 +415,7 @@ async fn save_profile_overrides(
         Err(err) => {
             return Ok(Html(render_profile_edit(
                 &profile,
+                &packages,
                 Some("overrides"),
                 Some(&err),
             )))
@@ -394,6 +431,7 @@ async fn save_profile_overrides(
 
     Ok(Html(render_profile_edit(
         &profile,
+        &packages,
         Some("overrides"),
         Some("Overrides saved."),
     )))
@@ -474,6 +512,7 @@ async fn new_profile_create(
         scenarios: parse_scenario_ids(form.scenario_ids.as_deref().unwrap_or("")),
         dependency_mod_ids: parse_mod_ids(form.dependency_mod_ids.as_deref().unwrap_or("")),
         optional_mod_ids: parse_mod_ids(form.optional_mod_ids.as_deref().unwrap_or("")),
+        optional_package_ids: Vec::new(),
         load_session_save: false,
         steamcmd_dir_override: None,
         reforger_server_exe_override: None,
@@ -867,7 +906,6 @@ async fn profile_workshop_resolve(
 #[derive(Deserialize)]
 struct WorkshopSaveForm {
     selected_scenario_id_path: String,
-    optional_mod_ids: String,
 }
 
 async fn profile_workshop_save(
@@ -889,7 +927,6 @@ async fn profile_workshop_save(
     }
 
     profile.selected_scenario_id_path = Some(scenario);
-    profile.optional_mod_ids = parse_mod_ids(&form.optional_mod_ids);
     save_profile(&profile)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
@@ -916,7 +953,10 @@ async fn config_preview_page(
     let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let preview = match generate_config_for_profile(&profile, &settings) {
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let preview = match generate_config_for_profile(&profile, &settings, &packages) {
         Ok(value) => serde_json::to_string_pretty(&value)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         Err(err) => err,
@@ -947,7 +987,10 @@ async fn config_preview_partial(
     let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let preview = match generate_config_for_profile(&profile, &settings) {
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let preview = match generate_config_for_profile(&profile, &settings, &packages) {
         Ok(value) => serde_json::to_string_pretty(&value)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         Err(err) => err,
@@ -981,7 +1024,10 @@ async fn write_config(
     let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let config = generate_config_for_profile(&profile, &settings)
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let config = generate_config_for_profile(&profile, &settings, &packages)
         .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
     let config_json = serde_json::to_string_pretty(&config)
         .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?;
@@ -1042,7 +1088,10 @@ async fn regenerate_config(
     let settings = load_settings(&state.settings_path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let preview = match generate_config_for_profile(&profile, &settings) {
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let preview = match generate_config_for_profile(&profile, &settings, &packages) {
         Ok(value) => serde_json::to_string_pretty(&value)
             .map_err(|err| (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()))?,
         Err(err) => err,
@@ -1620,7 +1669,12 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
     )
 }
 
-fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Option<&str>) -> String {
+fn render_profile_edit(
+    profile: &ServerProfile,
+    packages: &[backend::models::ModPackage],
+    tab: Option<&str>,
+    message: Option<&str>,
+) -> String {
     let notice = message
         .map(|value| format!("<p class=\"text-success\">{value}</p>"))
         .unwrap_or_default();
@@ -1661,6 +1715,35 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
     let last_resolved = format_resolve_timestamp(profile.last_resolved_at.as_deref())
         .unwrap_or_else(|| "Not resolved yet".to_string());
 
+    let mut package_options = String::new();
+    for package in packages {
+        let selected = if profile
+            .optional_package_ids
+            .iter()
+            .any(|id| id == &package.package_id)
+        {
+            "selected"
+        } else {
+            ""
+        };
+        package_options.push_str(&format!(
+            r#"<option value="{id}" {selected}>{name}</option>"#,
+            id = html_escape::encode_text(&package.package_id),
+            name = html_escape::encode_text(&package.name),
+            selected = selected,
+        ));
+    }
+    if package_options.is_empty() {
+        package_options.push_str("<option value=\"\">No packages defined.</option>");
+    }
+
+    let optional_mods = if profile.optional_mod_ids.is_empty() {
+        String::new()
+    } else {
+        profile.optional_mod_ids.join("\n")
+    };
+
+
     let general_content = format!(
         r#"<form method="post" action="/server/{id}/edit" class="card card-body mb-4">
           <h2 class="h5">Allgemein</h2>
@@ -1679,6 +1762,16 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
             </select>
             <div class="form-text text-muted">Selected: {scenario_name}</div>
           </div>
+          <div class="mb-3">
+            <label class="form-label text-muted" for="optional_package_ids">Optional packages</label>
+            <select class="form-select arssm-input" id="optional_package_ids" name="optional_package_ids" multiple>
+              {package_options}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="optional_mod_ids">Optional mod IDs (one per line)</label>
+            <textarea class="form-control arssm-input" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
+          </div>
           <p class="text-muted mb-3">Last resolved: {last_resolved}</p>
           <div class="d-flex gap-2">
             <button class="btn btn-arssm-primary" type="submit">Save</button>
@@ -1695,6 +1788,8 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
         scenario_name = html_escape::encode_text(&scenario_name),
         scenario_disabled = if profile.scenarios.is_empty() { "disabled" } else { "" },
         last_resolved = html_escape::encode_text(&last_resolved),
+        package_options = package_options,
+        optional_mods = html_escape::encode_text(&optional_mods),
     );
 
     let paths_content = format!(
@@ -2072,12 +2167,6 @@ fn render_workshop_panel(
         ""
     };
 
-    let optional_mods = if profile.optional_mod_ids.is_empty() {
-        String::new()
-    } else {
-        profile.optional_mod_ids.join("\n")
-    };
-
     let dependency_count = dependency_ids.len();
     let root_display = root_id
         .as_deref()
@@ -2115,13 +2204,10 @@ fn render_workshop_panel(
               </select>
             </div>
             <div class="mb-3">
-              <label class="form-label" for="optional_mod_ids">Optional mods (one ID per line)</label>
-              <textarea class="form-control arssm-input" id="optional_mod_ids" name="optional_mod_ids" rows="4">{optional_mods}</textarea>
-            </div>
-            <div class="d-flex gap-2">
-              <button class="btn btn-arssm-primary" type="submit">Save selection</button>
-              <a class="btn btn-arssm-secondary" href="/server/{id}/config-preview">Config Preview</a>
-            </div>
+              <div class="d-flex gap-2">
+                <button class="btn btn-arssm-primary" type="submit">Save selection</button>
+                <a class="btn btn-arssm-secondary" href="/server/{id}/config-preview">Config Preview</a>
+              </div>
           </form>
         </div>
 
@@ -2144,7 +2230,6 @@ fn render_workshop_panel(
         selection_badge = selection_badge,
         id = html_escape::encode_text(&profile.profile_id),
         scenario_options = scenario_options,
-        optional_mods = html_escape::encode_text(&optional_mods),
         dependency_count = dependency_count,
         dependency_list = dependency_list,
         root_display = html_escape::encode_text(root_display),
@@ -2618,6 +2703,7 @@ fn new_package_id() -> String {
 fn generate_config_for_profile(
     profile: &ServerProfile,
     settings: &AppSettings,
+    packages: &[backend::models::ModPackage],
 ) -> Result<serde_json::Value, String> {
     let scenario = profile
         .selected_scenario_id_path
@@ -2632,7 +2718,7 @@ fn generate_config_for_profile(
         .ok_or_else(|| "root_mod_id not set".to_string())?;
     mod_ids.push(root_mod_id);
     mod_ids.extend(profile.dependency_mod_ids.clone());
-    mod_ids.extend(profile.optional_mod_ids.clone());
+    mod_ids.extend(collect_optional_mod_ids(profile, packages));
 
     let mut config = generate_server_config(scenario, &mod_ids, Some(&profile.display_name))?;
     apply_default_server_json_settings(&mut config, settings);
@@ -2645,6 +2731,20 @@ fn generate_config_for_profile(
     )?;
 
     Ok(config)
+}
+
+fn collect_optional_mod_ids(
+    profile: &ServerProfile,
+    packages: &[backend::models::ModPackage],
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    for package_id in profile.optional_package_ids.iter() {
+        if let Some(package) = packages.iter().find(|entry| &entry.package_id == package_id) {
+            ids.extend(package.mod_ids.clone());
+        }
+    }
+    ids.extend(profile.optional_mod_ids.clone());
+    ids
 }
 
 async fn start_profile(

@@ -42,6 +42,7 @@ fn applies_settings_defaults_and_profile_overrides() {
         scenarios: Vec::new(),
         dependency_mod_ids: Vec::new(),
         optional_mod_ids: Vec::new(),
+        optional_package_ids: Vec::new(),
         load_session_save: false,
         steamcmd_dir_override: None,
         reforger_server_exe_override: None,
