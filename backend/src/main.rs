@@ -2443,7 +2443,7 @@ fn render_package_edit_page_with_selection(
                 r#"<div class="d-flex align-items-center justify-content-between gap-2">
                   <div>
                     <div class="arssm-text">{name}</div>
-                    <div class="text-muted small">{id}</div>
+                    <div class="text-muted small">{mod_id}</div>
                   </div>
                   <form method="post" action="/packages/packs/{id}/selection">
                     {hidden_ids}
@@ -2462,7 +2462,7 @@ fn render_package_edit_page_with_selection(
                 r#"<div class="d-flex align-items-center justify-content-between gap-2">
                   <div>
                     <div class="arssm-text">{name}</div>
-                    <div class="text-muted small">{id}</div>
+                    <div class="text-muted small">{mod_id}</div>
                   </div>
                   <form method="post" action="/packages/packs/{id}/selection">
                     {hidden_ids}
