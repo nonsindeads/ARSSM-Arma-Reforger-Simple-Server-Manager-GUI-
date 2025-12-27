@@ -86,7 +86,7 @@ pub async fn server_status_card(
 }
 
 #[derive(Deserialize)]
-struct ServerActionForm {
+pub(crate) struct ServerActionForm {
     action: String,
 }
 

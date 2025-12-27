@@ -247,8 +247,7 @@ pub async fn new_profile_resolve(
         .await
         .map_err(|message| (StatusCode::BAD_GATEWAY, message))?;
     Ok(Html(render_new_profile_resolve(
-        &workshop_url,
-        &result,
+        Some(&result),
         None,
     )))
 }

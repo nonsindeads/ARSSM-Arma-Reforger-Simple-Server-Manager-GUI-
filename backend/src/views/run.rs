@@ -43,40 +43,40 @@ pub fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
           const logOutput = document.getElementById('log-output');
           const profileSelect = document.getElementById('profile-select');
 
-          function appendLine(line) {
+          function appendLine(line) {{
             logOutput.textContent += line + '\n';
             logOutput.scrollTop = logOutput.scrollHeight;
-          }
+          }}
 
-          async function refreshStatus() {
+          async function refreshStatus() {{
             const response = await fetch('/api/run/status');
             const data = await response.json();
             statusText.textContent = data.running ? ('running (pid ' + data.pid + ')') : 'stopped';
-          }
+          }}
 
-          document.getElementById('start-btn').addEventListener('click', async () => {
+          document.getElementById('start-btn').addEventListener('click', async () => {{
             const profile_id = profileSelect.value;
-            const response = await fetch('/api/run/start', {
+            const response = await fetch('/api/run/start', {{
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ profile_id })
-            });
-            if (!response.ok) {
+              headers: {{ 'Content-Type': 'application/json' }},
+              body: JSON.stringify({{ profile_id }})
+            }});
+            if (!response.ok) {{
               const text = await response.text();
               alert(text);
-            }
+            }}
             refreshStatus();
-          });
+          }});
 
-          document.getElementById('stop-btn').addEventListener('click', async () => {
-            await fetch('/api/run/stop', { method: 'POST' });
+          document.getElementById('stop-btn').addEventListener('click', async () => {{
+            await fetch('/api/run/stop', {{ method: 'POST' }});
             refreshStatus();
-          });
+          }});
 
           const eventSource = new EventSource('/api/run/logs/stream');
-          eventSource.onmessage = (event) => {
+          eventSource.onmessage = (event) => {{
             appendLine(event.data);
-          };
+          }};
 
           refreshStatus();
         </script>"#,

@@ -66,7 +66,7 @@ pub async fn run_stop(
 }
 
 #[derive(serde::Serialize)]
-struct LogTailResponse {
+pub(crate) struct LogTailResponse {
     lines: Vec<String>,
 }
 

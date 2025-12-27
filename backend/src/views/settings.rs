@@ -45,13 +45,13 @@ pub fn render_settings_page(settings: &AppSettings, tab: Option<&str>, message: 
         <button class="btn btn-arssm-secondary" id="steamcmd-update">Run update</button>
         <p class="mt-2" id="steamcmd-status"></p>
         <script>
-          document.getElementById('steamcmd-update').addEventListener('click', async () => {
+          document.getElementById('steamcmd-update').addEventListener('click', async () => {{
             const status = document.getElementById('steamcmd-status');
             status.textContent = 'Running...';
-            const response = await fetch('/api/steamcmd/update', { method: 'POST' });
+            const response = await fetch('/api/steamcmd/update', {{ method: 'POST' }});
             const data = await response.json();
             status.textContent = data.message;
-          });
+          }});
         </script>"#,
         steamcmd_dir = html_escape::encode_text(&settings.steamcmd_dir),
         reforger_server_exe = html_escape::encode_text(&settings.reforger_server_exe),
