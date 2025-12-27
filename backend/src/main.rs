@@ -80,6 +80,7 @@ async fn main() {
         .route("/server/:profile_id", get(profile_detail))
         .route("/server/:profile_id/activate", axum::routing::post(activate_profile))
         .route("/server/:profile_id/edit", get(edit_profile_page).post(save_profile_edit))
+        .route("/server/:profile_id/optional-packages", axum::routing::post(update_profile_optional_packages))
         .route("/server/:profile_id/delete", axum::routing::post(delete_profile_action))
         .route("/server/:profile_id/paths", axum::routing::post(save_profile_paths))
         .route("/server/:profile_id/overrides", axum::routing::post(save_profile_overrides))
@@ -264,6 +265,14 @@ struct EditProfileForm {
     optional_mod_ids: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct OptionalPackagesForm {
+    action: String,
+    package_id: String,
+    #[serde(default, deserialize_with = "deserialize_mod_ids")]
+    optional_package_ids: Option<Vec<String>>,
+}
+
 async fn save_profile_edit(
     Path(profile_id): Path<String>,
     Form(form): Form<EditProfileForm>,
@@ -325,6 +334,35 @@ async fn save_profile_edit(
         &packages,
         Some("general"),
         Some("Profile updated."),
+    )))
+}
+
+async fn update_profile_optional_packages(
+    Path(profile_id): Path<String>,
+    Form(form): Form<OptionalPackagesForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mut profile = load_profile(&profile_id)
+        .await
+        .map_err(|message| (StatusCode::NOT_FOUND, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    let updated = update_list_selection(
+        form.optional_package_ids,
+        &form.action,
+        &form.package_id,
+    );
+    profile.optional_package_ids = updated;
+    save_profile(&profile)
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+
+    Ok(Html(render_profile_edit(
+        &profile,
+        &packages,
+        Some("general"),
+        Some("Optional packages updated."),
     )))
 }
 
@@ -833,7 +871,7 @@ async fn update_package_edit_selection(
         .find(|entry| entry.package_id == package_id)
         .cloned()
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Package not found".to_string()))?;
-    let selected = update_mod_selection(form.mod_ids, &form.action, &form.mod_id);
+    let selected = update_list_selection(form.mod_ids, &form.action, &form.mod_id);
     Ok(Html(render_package_edit_page_with_selection(
         &package,
         &mods,
@@ -1715,26 +1753,58 @@ fn render_profile_edit(
     let last_resolved = format_resolve_timestamp(profile.last_resolved_at.as_deref())
         .unwrap_or_else(|| "Not resolved yet".to_string());
 
-    let mut package_options = String::new();
+    let selected_set: std::collections::HashSet<&String> =
+        profile.optional_package_ids.iter().collect();
+    let mut available_rows = String::new();
+    let mut selected_rows = String::new();
+
     for package in packages {
-        let selected = if profile
-            .optional_package_ids
-            .iter()
-            .any(|id| id == &package.package_id)
-        {
-            "selected"
+        if selected_set.contains(&package.package_id) {
+            selected_rows.push_str(&format!(
+                r#"<div class="d-flex align-items-center justify-content-between gap-2">
+                  <div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
+                  </div>
+                  <form method="post" action="/server/{profile_id}/optional-packages">
+                    {hidden_ids}
+                    <input type="hidden" name="action" value="remove">
+                    <input type="hidden" name="package_id" value="{id}">
+                    <button class="btn btn-sm btn-arssm-danger" type="submit">Remove</button>
+                  </form>
+                </div>"#,
+                profile_id = html_escape::encode_text(&profile.profile_id),
+                id = html_escape::encode_text(&package.package_id),
+                name = html_escape::encode_text(&package.name),
+                hidden_ids = render_hidden_ids("optional_package_ids", &profile.optional_package_ids),
+            ));
         } else {
-            ""
-        };
-        package_options.push_str(&format!(
-            r#"<option value="{id}" {selected}>{name}</option>"#,
-            id = html_escape::encode_text(&package.package_id),
-            name = html_escape::encode_text(&package.name),
-            selected = selected,
-        ));
+            available_rows.push_str(&format!(
+                r#"<div class="d-flex align-items-center justify-content-between gap-2">
+                  <div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
+                  </div>
+                  <form method="post" action="/server/{profile_id}/optional-packages">
+                    {hidden_ids}
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="package_id" value="{id}">
+                    <button class="btn btn-sm btn-arssm-secondary" type="submit">Add</button>
+                  </form>
+                </div>"#,
+                profile_id = html_escape::encode_text(&profile.profile_id),
+                id = html_escape::encode_text(&package.package_id),
+                name = html_escape::encode_text(&package.name),
+                hidden_ids = render_hidden_ids("optional_package_ids", &profile.optional_package_ids),
+            ));
+        }
     }
-    if package_options.is_empty() {
-        package_options.push_str("<option value=\"\">No packages defined.</option>");
+
+    if available_rows.is_empty() {
+        available_rows.push_str("<div class=\"text-muted\">No available packages.</div>");
+    }
+    if selected_rows.is_empty() {
+        selected_rows.push_str("<div class=\"text-muted\">No packages selected.</div>");
     }
 
     let optional_mods = if profile.optional_mod_ids.is_empty() {
@@ -1744,8 +1814,27 @@ fn render_profile_edit(
     };
 
 
+    let selection_card = format!(
+        r#"<div class="card card-body mb-4">
+          <h2 class="h6 text-uppercase text-muted">Optional Packages</h2>
+          <div class="row g-2">
+            <div class="col-md-6">
+              <div class="text-muted small mb-1">Available</div>
+              <div class="d-grid gap-2">{available_rows}</div>
+            </div>
+            <div class="col-md-6">
+              <div class="text-muted small mb-1">Selected</div>
+              <div class="d-grid gap-2">{selected_rows}</div>
+            </div>
+          </div>
+        </div>"#,
+        available_rows = available_rows,
+        selected_rows = selected_rows,
+    );
+
     let general_content = format!(
-        r#"<form method="post" action="/server/{id}/edit" class="card card-body mb-4">
+        r#"{selection_card}
+        <form method="post" action="/server/{id}/edit" class="card card-body mb-4">
           <h2 class="h5">Allgemein</h2>
           <div class="mb-3">
             <label class="form-label" for="display_name">Display name</label>
@@ -1755,18 +1844,13 @@ fn render_profile_edit(
             <label class="form-label" for="workshop_url">Workshop URL</label>
             <input class="form-control arssm-input" id="workshop_url" name="workshop_url" value="{url}">
           </div>
+          {selected_hidden}
           <div class="mb-3">
             <label class="form-label" for="selected_scenario_id_path">Scenario</label>
             <select class="form-select arssm-input" id="selected_scenario_id_path" name="selected_scenario_id_path" {scenario_disabled}>
               {scenario_options}
             </select>
             <div class="form-text text-muted">Selected: {scenario_name}</div>
-          </div>
-          <div class="mb-3">
-            <label class="form-label text-muted" for="optional_package_ids">Optional packages</label>
-            <select class="form-select arssm-input" id="optional_package_ids" name="optional_package_ids" multiple>
-              {package_options}
-            </select>
           </div>
           <div class="mb-3">
             <label class="form-label" for="optional_mod_ids">Optional mod IDs (one per line)</label>
@@ -1781,6 +1865,7 @@ fn render_profile_edit(
         <form method="post" action="/server/{id}/delete">
           <button class="btn btn-arssm-danger" type="submit">Delete profile</button>
         </form>"#,
+        selection_card = selection_card,
         id = html_escape::encode_text(&profile.profile_id),
         name = html_escape::encode_text(&profile.display_name),
         url = html_escape::encode_text(&profile.workshop_url),
@@ -1788,7 +1873,7 @@ fn render_profile_edit(
         scenario_name = html_escape::encode_text(&scenario_name),
         scenario_disabled = if profile.scenarios.is_empty() { "disabled" } else { "" },
         last_resolved = html_escape::encode_text(&last_resolved),
-        package_options = package_options,
+        selected_hidden = render_hidden_ids("optional_package_ids", &profile.optional_package_ids),
         optional_mods = html_escape::encode_text(&optional_mods),
     );
 
@@ -2840,14 +2925,19 @@ async fn resolve_and_update_profile(
 }
 
 fn render_hidden_mod_ids(mod_ids: &[String]) -> String {
-    let joined = mod_ids.join(",");
+    render_hidden_ids("mod_ids", mod_ids)
+}
+
+fn render_hidden_ids(name: &str, ids: &[String]) -> String {
+    let joined = ids.join(",");
     format!(
-        r#"<input type="hidden" name="mod_ids" value="{value}">"#,
+        r#"<input type="hidden" name="{name}" value="{value}">"#,
+        name = html_escape::encode_text(name),
         value = html_escape::encode_text(&joined),
     )
 }
 
-fn update_mod_selection(
+fn update_list_selection(
     current: Option<Vec<String>>,
     action: &str,
     mod_id: &str,
