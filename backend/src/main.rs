@@ -13,7 +13,7 @@ async fn main() {
 
     let state = routes::default_state();
     let app = routes::build_router(state);
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("failed to bind server listener");
 
