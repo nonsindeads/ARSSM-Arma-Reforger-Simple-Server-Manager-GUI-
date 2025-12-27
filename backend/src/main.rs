@@ -248,6 +248,7 @@ async fn edit_profile_page(
 struct EditProfileForm {
     display_name: String,
     workshop_url: String,
+    selected_scenario_id_path: Option<String>,
 }
 
 async fn save_profile_edit(
@@ -268,6 +269,31 @@ async fn save_profile_edit(
 
     profile.display_name = form.display_name.trim().to_string();
     profile.workshop_url = form.workshop_url.trim().to_string();
+
+    if !profile.scenarios.is_empty() {
+        let selected = form
+            .selected_scenario_id_path
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if selected.is_empty() {
+            return Ok(Html(render_profile_edit(
+                &profile,
+                Some("general"),
+                Some("Scenario selection is required."),
+            )));
+        }
+        if !profile.scenarios.iter().any(|value| value == &selected) {
+            return Ok(Html(render_profile_edit(
+                &profile,
+                Some("general"),
+                Some("Selected scenario is not in the resolved list."),
+            )));
+        }
+        profile.selected_scenario_id_path = Some(selected);
+    }
+
     save_profile(&profile)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
@@ -1521,6 +1547,8 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
           <dd class="col-sm-9">{scenario_name}</dd>
           <dt class="col-sm-3">Active</dt>
           <dd class="col-sm-9">{active_badge}</dd>
+          <dt class="col-sm-3">Last resolved</dt>
+          <dd class="col-sm-9">{last_resolved}</dd>
         </dl>
         <a class="btn btn-arssm-secondary me-2" href="/server/{id}/workshop">Workshop resolve</a>
         <a class="btn btn-arssm-primary me-2" href="/server/{id}/config-preview">Config preview</a>
@@ -1538,6 +1566,10 @@ fn render_profile_detail(profile: &ServerProfile, active_profile_id: Option<&str
                 .as_str()
         ),
         active_badge = active_badge,
+        last_resolved = html_escape::encode_text(
+            &format_resolve_timestamp(profile.last_resolved_at.as_deref())
+                .unwrap_or_else(|| "Not resolved yet".to_string())
+        ),
     );
 
     render_layout(
@@ -1568,6 +1600,30 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
         overrides_active = if active_tab == "overrides" { "active" } else { "" },
     );
 
+    let mut scenario_options = String::new();
+    if profile.scenarios.is_empty() {
+        scenario_options.push_str("<option value=\"\">Resolve workshop first</option>");
+    } else {
+        for scenario in profile.scenarios.iter() {
+            let selected = profile
+                .selected_scenario_id_path
+                .as_deref()
+                .map(|value| value == scenario)
+                .unwrap_or(false);
+            let selected_attr = if selected { "selected" } else { "" };
+            scenario_options.push_str(&format!(
+                r#"<option value="{value}" {selected}>{value}</option>"#,
+                value = html_escape::encode_text(scenario),
+                selected = selected_attr,
+            ));
+        }
+    }
+
+    let scenario_name = scenario_display_name(profile.selected_scenario_id_path.as_deref())
+        .unwrap_or_else(|| "Not selected".to_string());
+    let last_resolved = format_resolve_timestamp(profile.last_resolved_at.as_deref())
+        .unwrap_or_else(|| "Not resolved yet".to_string());
+
     let general_content = format!(
         r#"<form method="post" action="/server/{id}/edit" class="card card-body mb-4">
           <h2 class="h5">Allgemein</h2>
@@ -1579,6 +1635,14 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
             <label class="form-label" for="workshop_url">Workshop URL</label>
             <input class="form-control arssm-input" id="workshop_url" name="workshop_url" value="{url}">
           </div>
+          <div class="mb-3">
+            <label class="form-label" for="selected_scenario_id_path">Scenario</label>
+            <select class="form-select arssm-input" id="selected_scenario_id_path" name="selected_scenario_id_path" {scenario_disabled}>
+              {scenario_options}
+            </select>
+            <div class="form-text text-muted">Selected: {scenario_name}</div>
+          </div>
+          <p class="text-muted mb-3">Last resolved: {last_resolved}</p>
           <div class="d-flex gap-2">
             <button class="btn btn-arssm-primary" type="submit">Save</button>
             <a class="btn btn-arssm-secondary" href="/server/{id}">Cancel</a>
@@ -1590,6 +1654,10 @@ fn render_profile_edit(profile: &ServerProfile, tab: Option<&str>, message: Opti
         id = html_escape::encode_text(&profile.profile_id),
         name = html_escape::encode_text(&profile.display_name),
         url = html_escape::encode_text(&profile.workshop_url),
+        scenario_options = scenario_options,
+        scenario_name = html_escape::encode_text(&scenario_name),
+        scenario_disabled = if profile.scenarios.is_empty() { "disabled" } else { "" },
+        last_resolved = html_escape::encode_text(&last_resolved),
     );
 
     let paths_content = format!(
@@ -2656,6 +2724,16 @@ fn scenario_display_name(path: Option<&str>) -> Option<String> {
     } else {
         Some(name.to_string())
     }
+}
+
+fn format_resolve_timestamp(value: Option<&str>) -> Option<String> {
+    let raw = value?;
+    let seconds: i64 = raw.parse().ok()?;
+    let timestamp = time::OffsetDateTime::from_unix_timestamp(seconds).ok()?;
+    let format =
+        time::format_description::parse("[year]-[month]-[day] [hour]:[minute]:[second]")
+            .ok()?;
+    Some(timestamp.format(&format).ok()?)
 }
 
 fn apply_default_server_json(settings: &mut AppSettings) {
