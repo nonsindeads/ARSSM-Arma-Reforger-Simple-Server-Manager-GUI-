@@ -108,7 +108,7 @@ pub fn render_defaults_form(settings: &AppSettings) -> String {
             </tr>"#,
             path = html_escape::encode_text(&field.path),
             kind = html_escape::encode_text(&field.kind),
-            value = html_escape::encode_text(&field.value),
+            value = html_escape::encode_double_quoted_attribute(&field.value),
             checked = checked,
         ));
     }
