@@ -115,7 +115,9 @@ async fn main() {
         .route("/packages/mods/:mod_id/edit", axum::routing::post(edit_mod))
         .route("/packages/mods/:mod_id/delete", axum::routing::post(delete_mod))
         .route("/packages/packs/add", axum::routing::post(add_package))
+        .route("/packages/packs/selection", axum::routing::post(update_package_selection))
         .route("/packages/packs/:package_id", get(package_edit_page))
+        .route("/packages/packs/:package_id/selection", axum::routing::post(update_package_edit_selection))
         .route("/packages/packs/:package_id/edit", axum::routing::post(edit_package))
         .route("/packages/packs/:package_id/delete", axum::routing::post(delete_package))
         .route("/run-logs", get(run_logs_page))
@@ -525,7 +527,12 @@ async fn packages_page() -> Result<Html<String>, (StatusCode, String)> {
     let packages = load_packages()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    Ok(Html(render_packages_page_full(&mods, &packages, None)))
+    Ok(Html(render_packages_page_full(
+        &mods,
+        &packages,
+        &[],
+        None,
+    )))
 }
 
 #[derive(Deserialize)]
@@ -548,6 +555,7 @@ async fn add_mod(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Mod ID and name are required."),
         )));
     }
@@ -558,6 +566,7 @@ async fn add_mod(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Mod ID already exists."),
         )));
     }
@@ -573,6 +582,7 @@ async fn add_mod(
     Ok(Html(render_packages_page_full(
         &mods,
         &packages,
+        &[],
         Some("Mod added."),
     )))
 }
@@ -592,6 +602,7 @@ async fn edit_mod(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Mod name is required."),
         )));
     }
@@ -609,6 +620,7 @@ async fn edit_mod(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Mod not found."),
         )));
     }
@@ -620,6 +632,7 @@ async fn edit_mod(
     Ok(Html(render_packages_page_full(
         &mods,
         &packages,
+        &[],
         Some("Mod updated."),
     )))
 }
@@ -638,6 +651,7 @@ async fn delete_mod(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Mod is used in a package and cannot be deleted."),
         )));
     }
@@ -650,6 +664,7 @@ async fn delete_mod(
     Ok(Html(render_packages_page_full(
         &mods,
         &packages,
+        &[],
         Some("Mod deleted."),
     )))
 }
@@ -675,6 +690,7 @@ async fn add_package(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &form.mod_ids.clone().unwrap_or_default(),
             Some("Package name is required."),
         )));
     }
@@ -692,6 +708,7 @@ async fn add_package(
     Ok(Html(render_packages_page_full(
         &mods,
         &packages,
+        &[],
         Some("Package created."),
     )))
 }
@@ -711,6 +728,7 @@ async fn edit_package(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Package name is required."),
         )));
     }
@@ -729,6 +747,7 @@ async fn edit_package(
         return Ok(Html(render_packages_page_full(
             &mods,
             &packages,
+            &[],
             Some("Package not found."),
         )));
     }
@@ -740,6 +759,7 @@ async fn edit_package(
     Ok(Html(render_packages_page_full(
         &mods,
         &packages,
+        &[],
         Some("Package updated."),
     )))
 }
@@ -761,7 +781,57 @@ async fn delete_package(
     Ok(Html(render_packages_page_full(
         &mods,
         &packages,
+        &[],
         Some("Package deleted."),
+    )))
+}
+
+#[derive(Deserialize)]
+struct PackageSelectionForm {
+    action: String,
+    mod_id: String,
+    #[serde(default, deserialize_with = "deserialize_mod_ids")]
+    mod_ids: Option<Vec<String>>,
+}
+
+async fn update_package_selection(
+    Form(form): Form<PackageSelectionForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let selected = update_mod_selection(form.mod_ids, &form.action, &form.mod_id);
+    Ok(Html(render_packages_page_full(
+        &mods,
+        &packages,
+        &selected,
+        Some("Package selection updated."),
+    )))
+}
+
+async fn update_package_edit_selection(
+    Path(package_id): Path<String>,
+    Form(form): Form<PackageSelectionForm>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    let mods = load_mods()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let packages = load_packages()
+        .await
+        .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    let package = packages
+        .iter()
+        .find(|entry| entry.package_id == package_id)
+        .cloned()
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Package not found".to_string()))?;
+    let selected = update_mod_selection(form.mod_ids, &form.action, &form.mod_id);
+    Ok(Html(render_package_edit_page_with_selection(
+        &package,
+        &mods,
+        &selected,
     )))
 }
 
@@ -779,7 +849,11 @@ async fn package_edit_page(
         .find(|entry| entry.package_id == package_id)
         .cloned()
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Package not found".to_string()))?;
-    Ok(Html(render_package_edit_page(&package, &mods)))
+    Ok(Html(render_package_edit_page_with_selection(
+        &package,
+        &mods,
+        &package.mod_ids,
+    )))
 }
 
 async fn profile_workshop_page(
@@ -2251,6 +2325,7 @@ fn render_run_logs_page(profiles: &[ServerProfile]) -> String {
 fn render_packages_page(
     mods: &[backend::models::ModEntry],
     packages: &[backend::models::ModPackage],
+    selected_mod_ids: &[String],
     message: Option<&str>,
 ) -> String {
     let notice = message
@@ -2309,6 +2384,57 @@ fn render_packages_page(
         package_rows.push_str("<tr><td colspan=\"3\" class=\"arssm-text\">No packages defined.</td></tr>");
     }
 
+    let selected_set: std::collections::HashSet<&String> = selected_mod_ids.iter().collect();
+    let mut available_rows = String::new();
+    let mut selected_rows = String::new();
+
+    for entry in mods {
+        if selected_set.contains(&entry.mod_id) {
+            selected_rows.push_str(&format!(
+                r#"<div class="d-flex align-items-center justify-content-between gap-2">
+                  <div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
+                  </div>
+                  <form method="post" action="/packages/packs/selection">
+                    {hidden_ids}
+                    <input type="hidden" name="action" value="remove">
+                    <input type="hidden" name="mod_id" value="{id}">
+                    <button class="btn btn-sm btn-arssm-danger" type="submit">Remove</button>
+                  </form>
+                </div>"#,
+                id = html_escape::encode_text(&entry.mod_id),
+                name = html_escape::encode_text(&entry.name),
+                hidden_ids = render_hidden_mod_ids(selected_mod_ids),
+            ));
+        } else {
+            available_rows.push_str(&format!(
+                r#"<div class="d-flex align-items-center justify-content-between gap-2">
+                  <div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
+                  </div>
+                  <form method="post" action="/packages/packs/selection">
+                    {hidden_ids}
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="mod_id" value="{id}">
+                    <button class="btn btn-sm btn-arssm-secondary" type="submit">Add</button>
+                  </form>
+                </div>"#,
+                id = html_escape::encode_text(&entry.mod_id),
+                name = html_escape::encode_text(&entry.name),
+                hidden_ids = render_hidden_mod_ids(selected_mod_ids),
+            ));
+        }
+    }
+
+    if available_rows.is_empty() {
+        available_rows.push_str("<div class=\"text-muted\">No available mods.</div>");
+    }
+    if selected_rows.is_empty() {
+        selected_rows.push_str("<div class=\"text-muted\">No mods selected.</div>");
+    }
+
     let content = format!(
         r#"<h1 class="h3 mb-3">Pakete / Mods</h1>
         {notice}
@@ -2348,14 +2474,19 @@ fn render_packages_page(
                 <div class="mb-2">
                   <input class="form-control arssm-input" name="name" placeholder="Package name">
                 </div>
-                <div class="mb-2">
-                  <label class="form-label text-muted">Mods in package</label>
-                  <div class="d-grid gap-2">
-                    {package_checklist}
-                  </div>
-                </div>
+                {selected_hidden}
                 <button class="btn btn-arssm-primary mt-2" type="submit">Create</button>
               </form>
+              <div class="row g-2 mb-3">
+                <div class="col-md-6">
+                  <div class="text-muted small mb-1">Available</div>
+                  <div class="d-grid gap-2">{available_rows}</div>
+                </div>
+                <div class="col-md-6">
+                  <div class="text-muted small mb-1">Selected</div>
+                  <div class="d-grid gap-2">{selected_rows}</div>
+                </div>
+              </div>
               <table class="table table-sm arssm-table">
                 <thead>
                   <tr>
@@ -2374,7 +2505,9 @@ fn render_packages_page(
         notice = notice,
         mod_rows = mod_rows,
         package_rows = package_rows,
-        package_checklist = render_mod_checklist(mods, None),
+        selected_hidden = render_hidden_mod_ids(selected_mod_ids),
+        available_rows = available_rows,
+        selected_rows = selected_rows,
     );
 
     content
@@ -2383,9 +2516,10 @@ fn render_packages_page(
 fn render_packages_page_full(
     mods: &[backend::models::ModEntry],
     packages: &[backend::models::ModPackage],
+    selected_mod_ids: &[String],
     message: Option<&str>,
 ) -> String {
-    let content = render_packages_page(mods, packages, message);
+    let content = render_packages_page(mods, packages, selected_mod_ids, message);
     render_layout(
         "ARSSM Pakete",
         "packages",
@@ -2394,10 +2528,64 @@ fn render_packages_page_full(
     )
 }
 
-fn render_package_edit_page(
+fn render_package_edit_page_with_selection(
     package: &backend::models::ModPackage,
     mods: &[backend::models::ModEntry],
+    selected_mod_ids: &[String],
 ) -> String {
+    let selected_set: std::collections::HashSet<&String> = selected_mod_ids.iter().collect();
+    let mut available_rows = String::new();
+    let mut selected_rows = String::new();
+
+    for entry in mods {
+        if selected_set.contains(&entry.mod_id) {
+            selected_rows.push_str(&format!(
+                r#"<div class="d-flex align-items-center justify-content-between gap-2">
+                  <div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
+                  </div>
+                  <form method="post" action="/packages/packs/{id}/selection">
+                    {hidden_ids}
+                    <input type="hidden" name="action" value="remove">
+                    <input type="hidden" name="mod_id" value="{mod_id}">
+                    <button class="btn btn-sm btn-arssm-danger" type="submit">Remove</button>
+                  </form>
+                </div>"#,
+                id = html_escape::encode_text(&package.package_id),
+                mod_id = html_escape::encode_text(&entry.mod_id),
+                name = html_escape::encode_text(&entry.name),
+                hidden_ids = render_hidden_mod_ids(selected_mod_ids),
+            ));
+        } else {
+            available_rows.push_str(&format!(
+                r#"<div class="d-flex align-items-center justify-content-between gap-2">
+                  <div>
+                    <div class="arssm-text">{name}</div>
+                    <div class="text-muted small">{id}</div>
+                  </div>
+                  <form method="post" action="/packages/packs/{id}/selection">
+                    {hidden_ids}
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="mod_id" value="{mod_id}">
+                    <button class="btn btn-sm btn-arssm-secondary" type="submit">Add</button>
+                  </form>
+                </div>"#,
+                id = html_escape::encode_text(&package.package_id),
+                mod_id = html_escape::encode_text(&entry.mod_id),
+                name = html_escape::encode_text(&entry.name),
+                hidden_ids = render_hidden_mod_ids(selected_mod_ids),
+            ));
+        }
+    }
+
+    if available_rows.is_empty() {
+        available_rows.push_str("<div class=\"text-muted\">No available mods.</div>");
+    }
+    if selected_rows.is_empty() {
+        selected_rows.push_str("<div class=\"text-muted\">No mods selected.</div>");
+    }
+
     let content = format!(
         r#"<h1 class="h3 mb-3">Package bearbeiten</h1>
         <form method="post" action="/packages/packs/{id}/edit" class="card card-body mb-4">
@@ -2405,10 +2593,15 @@ fn render_package_edit_page(
             <label class="form-label" for="name">Name</label>
             <input class="form-control arssm-input" id="name" name="name" value="{name}">
           </div>
-          <div class="mb-3">
-            <label class="form-label text-muted">Mods in package</label>
-            <div class="d-grid gap-2">
-              {checklist}
+          {selected_hidden}
+          <div class="row g-2 mb-3">
+            <div class="col-md-6">
+              <div class="text-muted small mb-1">Available</div>
+              <div class="d-grid gap-2">{available_rows}</div>
+            </div>
+            <div class="col-md-6">
+              <div class="text-muted small mb-1">Selected</div>
+              <div class="d-grid gap-2">{selected_rows}</div>
             </div>
           </div>
           <div class="d-flex gap-2">
@@ -2421,7 +2614,9 @@ fn render_package_edit_page(
         </form>"#,
         id = html_escape::encode_text(&package.package_id),
         name = html_escape::encode_text(&package.name),
-        checklist = render_mod_checklist(mods, Some(&package.mod_ids)),
+        selected_hidden = render_hidden_mod_ids(selected_mod_ids),
+        available_rows = available_rows,
+        selected_rows = selected_rows,
     );
 
     render_layout(
@@ -2649,29 +2844,35 @@ async fn resolve_and_update_profile(
     Ok(result)
 }
 
-fn render_mod_checklist(mods: &[backend::models::ModEntry], selected: Option<&[String]>) -> String {
-    if mods.is_empty() {
-        return "<div class=\"text-muted\">No mods available</div>".to_string();
-    }
-
-    let mut rows = String::new();
-    for entry in mods {
-        let is_checked = selected
-            .map(|list| list.iter().any(|id| id == &entry.mod_id))
-            .unwrap_or(false);
-        let checked = if is_checked { "checked" } else { "" };
-        rows.push_str(&format!(
-            r#"<label class="d-flex align-items-center gap-2">
-              <input type="checkbox" name="mod_ids" value="{id}" {checked}>
-              <span class="arssm-text">{name}</span>
-              <span class="text-muted small">{id}</span>
-            </label>"#,
-            id = html_escape::encode_text(&entry.mod_id),
-            name = html_escape::encode_text(&entry.name),
-            checked = checked,
+fn render_hidden_mod_ids(mod_ids: &[String]) -> String {
+    let mut fields = String::new();
+    for id in mod_ids {
+        fields.push_str(&format!(
+            r#"<input type="hidden" name="mod_ids" value="{id}">"#,
+            id = html_escape::encode_text(id),
         ));
     }
-    rows
+    fields
+}
+
+fn update_mod_selection(
+    current: Option<Vec<String>>,
+    action: &str,
+    mod_id: &str,
+) -> Vec<String> {
+    let mut selected = current.unwrap_or_default();
+    match action {
+        "add" => {
+            if !selected.iter().any(|id| id == mod_id) {
+                selected.push(mod_id.to_string());
+            }
+        }
+        "remove" => {
+            selected.retain(|id| id != mod_id);
+        }
+        _ => {}
+    }
+    selected
 }
 
 fn parse_mod_id_input(input: &str) -> Option<String> {
