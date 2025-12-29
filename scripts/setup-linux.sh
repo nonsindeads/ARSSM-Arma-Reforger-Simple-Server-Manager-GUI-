@@ -20,13 +20,25 @@ CREDENTIALS_PATH="$ARSSM_CONFIG_DIR/credentials.json"
 
 echo "Installing system dependencies via apt..."
 sudo apt-get update -y
-sudo apt-get install -y curl tar lib32gcc-s1 lib32stdc++6 ca-certificates openssl
+sudo apt-get install -y curl tar lib32gcc-s1 lib32stdc++6 ca-certificates openssl build-essential pkg-config
+
+if command -v cargo >/dev/null 2>&1; then
+  echo "Removing apt-provided Rust (if installed) to avoid old toolchains..."
+  sudo apt-get remove -y cargo rustc || true
+fi
 
 if ! command -v cargo >/dev/null 2>&1; then
-  echo "Installing Rust toolchain (cargo, rustc) via apt..."
-  sudo apt-get install -y cargo rustc
+  echo "Installing Rust toolchain via rustup..."
+  curl -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+  sh /tmp/rustup-init.sh -y
+  rm -f /tmp/rustup-init.sh
+  source "$HOME/.cargo/env"
 else
   echo "Rust toolchain already installed."
+fi
+
+if command -v cargo >/dev/null 2>&1; then
+  cargo --version
 fi
 
 echo "Preparing directories..."

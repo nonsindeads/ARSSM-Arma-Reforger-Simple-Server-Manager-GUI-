@@ -39,7 +39,7 @@ bash scripts/setup-linux.sh
 
 This will:
 - install required system packages via `apt`
-- install the Rust toolchain (cargo, rustc) via `apt` if missing
+- install the Rust toolchain via rustup if missing
 - download SteamCMD into `~/.local/share/arssm/steamcmd`
 - run SteamCMD once for initialization/login
 - install the Arma Reforger server via SteamCMD (appid 1874900)
