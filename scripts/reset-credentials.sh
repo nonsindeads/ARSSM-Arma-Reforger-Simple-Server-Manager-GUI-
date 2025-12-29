@@ -6,8 +6,8 @@ CREDENTIALS_PATH="$ARSSM_CONFIG_DIR/credentials.json"
 
 mkdir -p "$ARSSM_CONFIG_DIR"
 
-USERNAME="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)"
-PASSWORD="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 20)"
+USERNAME="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8 || true)"
+PASSWORD="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 20 || true)"
 
 cat > "$CREDENTIALS_PATH" <<EOF
 {

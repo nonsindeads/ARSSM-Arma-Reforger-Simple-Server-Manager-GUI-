@@ -53,8 +53,8 @@ else
 fi
 
 if [[ ! -s "$CREDENTIALS_PATH" ]]; then
-  USERNAME="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)"
-  PASSWORD="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 20)"
+  USERNAME="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8 || true)"
+  PASSWORD="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 20 || true)"
   cat > "$CREDENTIALS_PATH" <<EOF
 {
   "username": "$USERNAME",
@@ -64,6 +64,7 @@ EOF
   echo "Generated credentials:"
   echo "  Username: $USERNAME"
   echo "  Password: $PASSWORD"
+  echo "Stored at: $CREDENTIALS_PATH"
 else
   echo "Credentials already exist at $CREDENTIALS_PATH (not overwriting)."
   echo "Show them with: cat \"$CREDENTIALS_PATH\""
