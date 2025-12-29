@@ -44,3 +44,9 @@ See `docs/windows.md`.
 ## Linux (Ubuntu 22.04)
 
 See `docs/linux.md`. Use `scripts/setup-linux.sh` for the first-time setup.
+
+## Security
+
+ARSSM uses HTTPS with a self-signed certificate and HTTP Basic authentication.
+The Linux setup script generates credentials in `~/.config/arssm/credentials.json`.
+Use `scripts/reset-credentials.sh` to generate new credentials.

@@ -8,6 +8,7 @@ pub mod settings;
 pub mod workshop;
 
 use axum::{Router, routing::get};
+use base64::Engine as _;
 use backend::{runner::RunManager, storage::settings_path, workshop::{ReqwestFetcher, WorkshopResolver}};
 use std::path::PathBuf;
 use tower_http::services::ServeDir;
@@ -22,6 +23,7 @@ pub struct AppState {
     pub settings_path: PathBuf,
     pub run_manager: RunManager,
     pub system: Arc<Mutex<System>>,
+    pub auth: crate::security::Credentials,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -70,16 +72,30 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health::health))
         .route("/", get(dashboard::dashboard_page))
         .nest_service("/web", ServeDir::new(web_dir))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), auth_middleware))
         .with_state(state)
 }
 
-pub fn default_state() -> AppState {
+pub async fn default_state() -> AppState {
+    let (creds, generated) = crate::security::load_or_create_credentials()
+        .await
+        .unwrap_or_else(|err| {
+            panic!("failed to load credentials: {err}");
+        });
+    if generated {
+        tracing::info!(
+            "Generated credentials (store securely) username={} password={}",
+            creds.username,
+            creds.password
+        );
+    }
     AppState {
         config_path: config::config_path(),
         workshop_resolver: WorkshopResolver::new(std::sync::Arc::new(ReqwestFetcher::new())),
         settings_path: settings_path(),
         run_manager: RunManager::new(),
         system: Arc::new(Mutex::new(System::new())),
+        auth: creds,
     }
 }
 
@@ -87,4 +103,34 @@ fn web_dir() -> PathBuf {
     std::env::var("ARSSM_WEB_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..").join("web"))
+}
+
+async fn auth_middleware(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    request: axum::http::Request<axum::body::Body>,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, axum::http::StatusCode> {
+    let header = request.headers().get(axum::http::header::AUTHORIZATION);
+    if let Some(header) = header.and_then(|value| value.to_str().ok()) {
+        if let Some(value) = header.strip_prefix("Basic ") {
+            if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(value) {
+                if let Ok(decoded) = String::from_utf8(decoded) {
+                    let mut parts = decoded.splitn(2, ':');
+                    let user = parts.next().unwrap_or("");
+                    let pass = parts.next().unwrap_or("");
+                    if user == state.auth.username && pass == state.auth.password {
+                        return Ok(next.run(request).await);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut response = axum::response::Response::new(axum::body::Body::from("Unauthorized"));
+    *response.status_mut() = axum::http::StatusCode::UNAUTHORIZED;
+    response.headers_mut().insert(
+        axum::http::header::WWW_AUTHENTICATE,
+        axum::http::HeaderValue::from_static("Basic realm=\"ARSSM\""),
+    );
+    Ok(response)
 }

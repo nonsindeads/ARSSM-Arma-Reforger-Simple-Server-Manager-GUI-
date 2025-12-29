@@ -42,6 +42,7 @@ This will:
 - download SteamCMD into `~/.local/share/arssm/steamcmd`
 - install the Arma Reforger server via SteamCMD (appid 1874880)
 - write default ARSSM settings to `~/.config/arssm/settings.json`
+- generate credentials for the web UI (stored in `~/.config/arssm/credentials.json`)
 
 ## Manual SteamCMD install (optional)
 

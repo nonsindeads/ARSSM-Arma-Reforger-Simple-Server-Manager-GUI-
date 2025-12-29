@@ -16,10 +16,11 @@ ARSSM_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/arssm"
 STEAMCMD_DIR="$ARSSM_DATA_DIR/steamcmd"
 SERVER_DIR="$ARSSM_DATA_DIR/arma-reforger-server"
 PROFILE_DIR="$ARSSM_DATA_DIR/profiles"
+CREDENTIALS_PATH="$ARSSM_CONFIG_DIR/credentials.json"
 
 echo "Installing system dependencies via apt..."
 sudo apt-get update -y
-sudo apt-get install -y curl tar lib32gcc-s1 lib32stdc++6 ca-certificates
+sudo apt-get install -y curl tar lib32gcc-s1 lib32stdc++6 ca-certificates openssl
 
 echo "Preparing directories..."
 mkdir -p "$STEAMCMD_DIR" "$SERVER_DIR" "$PROFILE_DIR" "$ARSSM_CONFIG_DIR"
@@ -49,6 +50,22 @@ if [[ ! -s "$SETTINGS_PATH" ]]; then
 EOF
 else
   echo "Settings already exist at $SETTINGS_PATH (not overwriting)."
+fi
+
+if [[ ! -s "$CREDENTIALS_PATH" ]]; then
+  USERNAME="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 8)"
+  PASSWORD="$(tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 20)"
+  cat > "$CREDENTIALS_PATH" <<EOF
+{
+  "username": "$USERNAME",
+  "password": "$PASSWORD"
+}
+EOF
+  echo "Generated credentials:"
+  echo "  Username: $USERNAME"
+  echo "  Password: $PASSWORD"
+else
+  echo "Credentials already exist at $CREDENTIALS_PATH (not overwriting)."
 fi
 
 echo "Installing Arma Reforger server via SteamCMD (appid 1874880)..."
