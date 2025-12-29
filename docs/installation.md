@@ -33,3 +33,14 @@ http://127.0.0.1:3000/
 3) Save settings.
 4) Create a profile and resolve a workshop URL.
 5) Generate the `server.json` and start the server.
+# Installation
+
+ARSSM is a local web app with a Rust backend. Choose your platform below.
+
+## Windows
+
+See `docs/windows.md`.
+
+## Linux (Ubuntu 22.04)
+
+See `docs/linux.md`. Use `scripts/setup-linux.sh` for the first-time setup.

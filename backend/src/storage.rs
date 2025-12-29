@@ -18,16 +18,33 @@ pub struct AppSettings {
 
 impl Default for AppSettings {
     fn default() -> Self {
-        Self {
-            steamcmd_dir: r"C:\steamcmd".to_string(),
-            reforger_server_exe: r"C:\steamcmd\steamapps\common\Arma Reforger Server\ArmaReforgerServer.exe"
-                .to_string(),
-            reforger_server_work_dir: r"C:\steamcmd\steamapps\common\Arma Reforger Server"
-                .to_string(),
-            profile_dir_base: r"C:\ArmaReforger\profile".to_string(),
-            active_profile_id: None,
-            server_json_defaults: serde_json::Value::Null,
-            server_json_enabled: std::collections::HashMap::new(),
+        if cfg!(target_os = "windows") {
+            Self {
+                steamcmd_dir: r"C:\steamcmd".to_string(),
+                reforger_server_exe: r"C:\steamcmd\steamapps\common\Arma Reforger Server\ArmaReforgerServer.exe"
+                    .to_string(),
+                reforger_server_work_dir: r"C:\steamcmd\steamapps\common\Arma Reforger Server"
+                    .to_string(),
+                profile_dir_base: r"C:\ArmaReforger\profile".to_string(),
+                active_profile_id: None,
+                server_json_defaults: serde_json::Value::Null,
+                server_json_enabled: std::collections::HashMap::new(),
+            }
+        } else {
+            let data_dir = data_dir();
+            let server_dir = data_dir.join("arma-reforger-server");
+            Self {
+                steamcmd_dir: data_dir.join("steamcmd").to_string_lossy().to_string(),
+                reforger_server_exe: server_dir
+                    .join("ArmaReforgerServer")
+                    .to_string_lossy()
+                    .to_string(),
+                reforger_server_work_dir: server_dir.to_string_lossy().to_string(),
+                profile_dir_base: data_dir.join("profiles").to_string_lossy().to_string(),
+                active_profile_id: None,
+                server_json_defaults: serde_json::Value::Null,
+                server_json_enabled: std::collections::HashMap::new(),
+            }
         }
     }
 }
@@ -56,6 +73,16 @@ pub fn base_dir() -> PathBuf {
     }
     if let Ok(home) = std::env::var("HOME") {
         return PathBuf::from(home).join(".config").join("arssm");
+    }
+    PathBuf::from("arssm-data")
+}
+
+pub fn data_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
+        return PathBuf::from(xdg).join("arssm");
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        return PathBuf::from(home).join(".local").join("share").join("arssm");
     }
     PathBuf::from("arssm-data")
 }
