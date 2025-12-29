@@ -70,17 +70,23 @@ else
   echo "Show them with: cat \"$CREDENTIALS_PATH\""
 fi
 
-echo "Installing Arma Reforger server via SteamCMD (appid 1874880)..."
+echo "Initializing SteamCMD (first run)..."
 STEAMCMD_BIN="$STEAMCMD_DIR/steamcmd.sh"
 if [[ ! -x "$STEAMCMD_BIN" ]]; then
   chmod +x "$STEAMCMD_BIN"
 fi
 
-echo "Running: $STEAMCMD_BIN +force_install_dir \"$SERVER_DIR\" +login anonymous +app_update 1874880 validate +quit"
+echo "Running: $STEAMCMD_BIN +login anonymous +quit"
+"$STEAMCMD_BIN" \
+  +login anonymous \
+  +quit
+
+echo "Installing Arma Reforger server via SteamCMD (appid 1874900)..."
+echo "Running: $STEAMCMD_BIN +force_install_dir \"$SERVER_DIR\" +login anonymous +app_update 1874900 validate +quit"
 "$STEAMCMD_BIN" \
   +force_install_dir "$SERVER_DIR" \
   +login anonymous \
-  +app_update 1874880 validate \
+  +app_update 1874900 validate \
   +quit
 echo "SteamCMD finished."
 
