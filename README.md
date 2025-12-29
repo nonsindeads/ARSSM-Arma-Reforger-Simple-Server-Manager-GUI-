@@ -35,6 +35,29 @@ ARSSM is built with a Rust backend and a minimal local web interface, designed t
 - Cloud-based management platform
 - Monolithic GUI application
 
+## Setup
+
+### Windows
+- Build and run the backend (`backend`).
+- On first start, ARSSM generates a self-signed HTTPS certificate and random credentials.
+- Credentials are stored at `%APPDATA%\arssm\credentials.json`.
+- Open `https://<host>:3000` and use HTTP Basic authentication.
+
+### Linux (Ubuntu 22.04)
+- Run the setup script once:
+  - `bash scripts/setup-linux.sh`
+- This installs dependencies, SteamCMD, the dedicated server, and writes defaults.
+- Credentials are stored at `~/.config/arssm/credentials.json`.
+- Open `https://<host>:3000` and use HTTP Basic authentication.
+
+### Reset credentials
+- Linux: `bash scripts/reset-credentials.sh`
+- Windows: delete `%APPDATA%\arssm\credentials.json` and restart the server.
+
+### Notes
+- HTTPS uses a self-signed certificate. Your browser will show a warning.
+- ARSSM binds to `0.0.0.0:3000` so you can access it via LAN IP.
+
 ## Config storage
 
 The backend stores configuration in a single JSON file.
