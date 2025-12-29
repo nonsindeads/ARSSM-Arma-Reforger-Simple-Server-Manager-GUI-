@@ -11,6 +11,16 @@ The application focuses on clarity, determinism, and automation:
 
 ARSSM is built with a Rust backend and a minimal local web interface, designed to run on Windows hosts while remaining portable to Linux environments.
 
+## Quick start
+
+### Windows
+- Run the backend.
+- Open `https://<host>:3000` and use credentials from `%APPDATA%\arssm\credentials.json`.
+
+### Linux (Ubuntu 22.04)
+- `bash scripts/setup-linux.sh`
+- Open `https://<host>:3000` and use credentials from `~/.config/arssm/credentials.json`.
+
 ## Key features
 
 - Create server profiles from Arma Reforger workshop URLs
