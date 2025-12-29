@@ -4,11 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.7"
+axum = "0.6"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tower-http = { version = "0.5", features = ["fs"] }
+tower-http = { version = "0.4", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 async-trait = "0.1"
@@ -20,7 +20,7 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 minijinja = { version = "2", features = ["loader"] }
 time = { version = "0.3.20", features = ["formatting", "local-offset"] }
 sysinfo = "0.30"
-axum-server = { version = "0.6", features = ["rustls"] }
+axum-server = { version = "0.5", features = ["tls-rustls"] }
 rcgen = "0.12"
 base64 = "0.22"
 rand = "0.8"
