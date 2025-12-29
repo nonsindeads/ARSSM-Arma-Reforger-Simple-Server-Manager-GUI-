@@ -51,7 +51,18 @@ else
   echo "Settings already exist at $SETTINGS_PATH (not overwriting)."
 fi
 
+echo "Installing Arma Reforger server via SteamCMD (appid 1874880)..."
+STEAMCMD_BIN="$STEAMCMD_DIR/steamcmd.sh"
+if [[ ! -x "$STEAMCMD_BIN" ]]; then
+  chmod +x "$STEAMCMD_BIN"
+fi
+
+"$STEAMCMD_BIN" \
+  +force_install_dir "$SERVER_DIR" \
+  +login anonymous \
+  +app_update 1874880 validate \
+  +quit
+
 echo "Setup complete."
 echo "Next steps:"
-echo "1) Install the server via SteamCMD into $SERVER_DIR (appid 1874880)."
-echo "2) Start ARSSM and review Settings."
+echo "1) Start ARSSM and review Settings."

@@ -40,14 +40,12 @@ bash scripts/setup-linux.sh
 This will:
 - install required system packages via `apt`
 - download SteamCMD into `~/.local/share/arssm/steamcmd`
+- install the Arma Reforger server via SteamCMD (appid 1874880)
 - write default ARSSM settings to `~/.config/arssm/settings.json`
 
-## Install Arma Reforger Server
+## Manual SteamCMD install (optional)
 
-Use SteamCMD to install the dedicated server into:
-`~/.local/share/arssm/arma-reforger-server`
-
-Example (appid 1874880):
+If you want to reinstall manually:
 
 ```bash
 ~/.local/share/arssm/steamcmd/steamcmd.sh \
