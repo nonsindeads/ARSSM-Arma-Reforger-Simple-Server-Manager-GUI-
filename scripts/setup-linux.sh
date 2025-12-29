@@ -22,6 +22,13 @@ echo "Installing system dependencies via apt..."
 sudo apt-get update -y
 sudo apt-get install -y curl tar lib32gcc-s1 lib32stdc++6 ca-certificates openssl
 
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "Installing Rust toolchain (cargo, rustc) via apt..."
+  sudo apt-get install -y cargo rustc
+else
+  echo "Rust toolchain already installed."
+fi
+
 echo "Preparing directories..."
 mkdir -p "$STEAMCMD_DIR" "$SERVER_DIR" "$PROFILE_DIR" "$ARSSM_CONFIG_DIR"
 
