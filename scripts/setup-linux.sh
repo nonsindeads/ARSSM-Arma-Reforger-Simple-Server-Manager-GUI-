@@ -66,6 +66,7 @@ EOF
   echo "  Password: $PASSWORD"
 else
   echo "Credentials already exist at $CREDENTIALS_PATH (not overwriting)."
+  echo "Show them with: cat \"$CREDENTIALS_PATH\""
 fi
 
 echo "Installing Arma Reforger server via SteamCMD (appid 1874880)..."
@@ -74,11 +75,18 @@ if [[ ! -x "$STEAMCMD_BIN" ]]; then
   chmod +x "$STEAMCMD_BIN"
 fi
 
+echo "Running: $STEAMCMD_BIN +force_install_dir \"$SERVER_DIR\" +login anonymous +app_update 1874880 validate +quit"
 "$STEAMCMD_BIN" \
   +force_install_dir "$SERVER_DIR" \
   +login anonymous \
   +app_update 1874880 validate \
   +quit
+echo "SteamCMD finished."
+
+if [[ ! -f "$SERVER_DIR/ArmaReforgerServer" ]]; then
+  echo "Warning: server binary not found at $SERVER_DIR/ArmaReforgerServer"
+  echo "Check SteamCMD output above for errors."
+fi
 
 echo "Setup complete."
 echo "Next steps:"
