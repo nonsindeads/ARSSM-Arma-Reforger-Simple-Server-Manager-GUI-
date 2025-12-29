@@ -3,6 +3,7 @@ use rcgen::{CertificateParams, SanType};
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
+use backend::storage;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Credentials {
@@ -11,11 +12,11 @@ pub struct Credentials {
 }
 
 pub fn credentials_path() -> PathBuf {
-    crate::storage::base_dir().join("credentials.json")
+    storage::base_dir().join("credentials.json")
 }
 
 pub fn certs_dir() -> PathBuf {
-    crate::storage::base_dir().join("certs")
+    storage::base_dir().join("certs")
 }
 
 pub fn cert_path() -> PathBuf {

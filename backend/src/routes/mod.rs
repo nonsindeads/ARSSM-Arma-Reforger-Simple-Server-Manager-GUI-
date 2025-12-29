@@ -108,7 +108,7 @@ fn web_dir() -> PathBuf {
 async fn auth_middleware(
     axum::extract::State(state): axum::extract::State<AppState>,
     request: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
+    next: axum::middleware::Next<axum::body::Body>,
 ) -> Result<axum::response::Response, axum::http::StatusCode> {
     let header = request.headers().get(axum::http::header::AUTHORIZATION);
     if let Some(header) = header.and_then(|value| value.to_str().ok()) {
@@ -132,5 +132,5 @@ async fn auth_middleware(
         axum::http::header::WWW_AUTHENTICATE,
         axum::http::HeaderValue::from_static("Basic realm=\"ARSSM\""),
     );
-    Ok(response)
+    Ok(response.map(axum::body::boxed))
 }
