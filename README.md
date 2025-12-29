@@ -67,6 +67,7 @@ ARSSM is built with a Rust backend and a minimal local web interface, designed t
 ### Notes
 - HTTPS uses a self-signed certificate. Your browser will show a warning.
 - ARSSM binds to `0.0.0.0:3000` so you can access it via LAN IP.
+- If your source is on a filesystem that blocks executables (e.g., CIFS), set `CARGO_TARGET_DIR` to a local path before building.
 
 ## Config storage
 

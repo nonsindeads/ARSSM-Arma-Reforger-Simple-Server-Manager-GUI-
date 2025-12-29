@@ -1,2 +1,2 @@
 [build]
-target-dir = "/home/simong/build/arssm-target"
+target-dir = "target"
