@@ -1,7 +1,7 @@
 use crate::services::{format_resolve_timestamp, scenario_display_name};
 use crate::views::helpers::render_hidden_ids;
 use crate::views::layout::{breadcrumb, render_layout};
-use backend::defaults::flatten_defaults;
+use backend::defaults::{flatten_defaults, get_json_path, value_to_string};
 use backend::models::{ModPackage, ServerProfile};
 
 pub fn render_profiles_page(
@@ -378,6 +378,13 @@ pub fn render_profile_overrides_form(
             .copied()
             .unwrap_or(false);
         let checked = if enabled { "checked" } else { "" };
+        let value = if enabled {
+            get_json_path(&profile.server_json_overrides, &field.path)
+                .map(value_to_string)
+                .unwrap_or_else(|| field.value.clone())
+        } else {
+            field.value.clone()
+        };
         rows.push_str(&format!(
             r#"<tr>
               <td><input type="checkbox" name="default_enabled.{path}" {checked}></td>
@@ -389,7 +396,7 @@ pub fn render_profile_overrides_form(
             </tr>"#,
             path = html_escape::encode_text(&field.path),
             kind = html_escape::encode_text(&field.kind),
-            value = html_escape::encode_double_quoted_attribute(&field.value),
+            value = html_escape::encode_double_quoted_attribute(&value),
             checked = checked,
         ));
     }

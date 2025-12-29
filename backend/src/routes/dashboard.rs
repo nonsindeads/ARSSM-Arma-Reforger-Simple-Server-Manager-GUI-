@@ -55,7 +55,7 @@ pub async fn header_status_partial(
     };
 
     let (cpu, ram) = if let Some(pid) = status.pid {
-        process_metrics(pid)
+        process_metrics(&state.system, pid).await
     } else {
         (None, None)
     };
@@ -77,8 +77,11 @@ pub async fn header_status_partial(
     Ok(Html(html))
 }
 
-fn process_metrics(pid: u32) -> (Option<String>, Option<String>) {
-    let mut system = System::new();
+async fn process_metrics(
+    system: &std::sync::Arc<tokio::sync::Mutex<System>>,
+    pid: u32,
+) -> (Option<String>, Option<String>) {
+    let mut system = system.lock().await;
     system.refresh_processes();
     let pid = Pid::from_u32(pid);
     if let Some(process) = system.process(pid) {

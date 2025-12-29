@@ -11,6 +11,9 @@ use axum::{Router, routing::get};
 use backend::{runner::RunManager, storage::settings_path, workshop::{ReqwestFetcher, WorkshopResolver}};
 use std::path::PathBuf;
 use tower_http::services::ServeDir;
+use tokio::sync::Mutex;
+use std::sync::Arc;
+use sysinfo::System;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -18,6 +21,7 @@ pub struct AppState {
     pub workshop_resolver: WorkshopResolver,
     pub settings_path: PathBuf,
     pub run_manager: RunManager,
+    pub system: Arc<Mutex<System>>,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -75,6 +79,7 @@ pub fn default_state() -> AppState {
         workshop_resolver: WorkshopResolver::new(std::sync::Arc::new(ReqwestFetcher::new())),
         settings_path: settings_path(),
         run_manager: RunManager::new(),
+        system: Arc::new(Mutex::new(System::new())),
     }
 }
 

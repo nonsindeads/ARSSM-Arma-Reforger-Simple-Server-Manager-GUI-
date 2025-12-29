@@ -9,6 +9,7 @@ use tokio::{
     process::{Child, Command},
     sync::{broadcast, Mutex},
 };
+use std::io::{Read, Seek, SeekFrom};
 
 const MAX_LOG_LINES: usize = 500;
 
@@ -86,10 +87,8 @@ impl RunManager {
         };
 
         if let Some(path) = path {
-            if let Ok(contents) = tokio::fs::read_to_string(&path).await {
-                let lines: Vec<&str> = contents.lines().collect();
-                let start = lines.len().saturating_sub(limit);
-                return lines[start..].iter().map(|line| (*line).to_string()).collect();
+            if let Ok(lines) = read_last_lines(path, limit).await {
+                return lines;
             }
         }
 
@@ -227,6 +226,48 @@ async fn append_line_to_file(path: &Path, line: &str) -> Result<(), String> {
         .await
         .map_err(|err| format!("failed to write log newline: {err}"))?;
     Ok(())
+}
+
+async fn read_last_lines(path: PathBuf, limit: usize) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut file = std::fs::File::open(&path)
+            .map_err(|err| format!("failed to open log file: {err}"))?;
+        let mut position = file
+            .metadata()
+            .map_err(|err| format!("failed to read log metadata: {err}"))?
+            .len();
+        if position == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut buffer = Vec::new();
+        let mut newline_count = 0usize;
+        let chunk_size: u64 = 8192;
+
+        while position > 0 && newline_count <= limit {
+            let read_size = if position >= chunk_size {
+                chunk_size
+            } else {
+                position
+            };
+            position -= read_size;
+            file.seek(SeekFrom::Start(position))
+                .map_err(|err| format!("failed to seek log file: {err}"))?;
+
+            let mut chunk = vec![0u8; read_size as usize];
+            file.read_exact(&mut chunk)
+                .map_err(|err| format!("failed to read log file: {err}"))?;
+            newline_count += chunk.iter().filter(|&&byte| byte == b'\n').count();
+            buffer.splice(0..0, chunk);
+        }
+
+        let text = String::from_utf8_lossy(&buffer);
+        let lines: Vec<&str> = text.lines().collect();
+        let start = lines.len().saturating_sub(limit);
+        Ok(lines[start..].iter().map(|line| (*line).to_string()).collect())
+    })
+    .await
+    .map_err(|err| format!("failed to read log tail: {err}"))?
 }
 
 #[cfg(test)]

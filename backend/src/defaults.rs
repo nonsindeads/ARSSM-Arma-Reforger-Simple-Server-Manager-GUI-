@@ -189,3 +189,25 @@ pub fn set_json_path(
     }
     Ok(())
 }
+
+pub fn get_json_path<'a>(
+    target: &'a serde_json::Value,
+    path: &str,
+) -> Option<&'a serde_json::Value> {
+    let mut current = target;
+    for part in path.split('.') {
+        current = current.get(part)?;
+    }
+    Some(current)
+}
+
+pub fn value_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Object(map) => serde_json::to_string(map).unwrap_or_default(),
+        serde_json::Value::Array(list) => serde_json::to_string(list).unwrap_or_default(),
+        serde_json::Value::String(text) => text.clone(),
+        serde_json::Value::Number(num) => num.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Null => "".to_string(),
+    }
+}
