@@ -107,7 +107,7 @@ pub(crate) async fn start_profile(
     );
     let config_path = generated_config_path(&server_work_dir, &profile.profile_id);
 
-    if tokio::fs::metadata(&config_path).await.is_err() {
+    {
         let packages = load_packages().await?;
         let config_value = generate_config_for_profile(&profile, settings, &packages)?;
         let config_json = serde_json::to_string_pretty(&config_value)

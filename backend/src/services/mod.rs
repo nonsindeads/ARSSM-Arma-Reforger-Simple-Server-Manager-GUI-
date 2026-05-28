@@ -29,12 +29,6 @@ pub fn generate_config_for_profile(
     let mut config = generate_server_config(scenario, &mod_ids, Some(&profile.display_name))?;
     defaults::apply_default_server_json_settings(&mut config, settings);
     defaults::apply_profile_overrides(&mut config, profile)?;
-    backend::config_gen::apply_game_overrides(
-        &mut config,
-        scenario,
-        &mod_ids,
-        Some(&profile.display_name),
-    )?;
 
     Ok(config)
 }
@@ -56,7 +50,7 @@ pub fn parse_mod_id_input(input: &str) -> Option<String> {
         return workshop::extract_workshop_id_from_url(trimmed);
     }
     if trimmed.len() == 16 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Some(trimmed.to_string());
+        return Some(trimmed.to_uppercase());
     }
     None
 }

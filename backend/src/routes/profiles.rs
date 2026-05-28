@@ -160,9 +160,16 @@ pub async fn delete_profile_action(
     let profiles = list_profiles()
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
-    let settings = load_settings(&settings_path())
+    let path = settings_path();
+    let mut settings = load_settings(&path)
         .await
         .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    if settings.active_profile_id.as_deref() == Some(&profile_id) {
+        settings.active_profile_id = None;
+        save_settings(&path, &settings)
+            .await
+            .map_err(|message| (StatusCode::INTERNAL_SERVER_ERROR, message))?;
+    }
     Ok(Html(render_profiles_page(
         &profiles,
         settings.active_profile_id.as_deref(),

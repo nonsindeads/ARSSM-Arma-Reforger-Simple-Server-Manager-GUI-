@@ -142,12 +142,6 @@ pub async fn save_settings(path: &Path, settings: &AppSettings) -> Result<(), St
         .await
         .map_err(|err| format!("failed to write temp settings: {err}"))?;
 
-    if tokio::fs::metadata(path).await.is_ok() {
-        tokio::fs::remove_file(path)
-            .await
-            .map_err(|err| format!("failed to remove old settings: {err}"))?;
-    }
-
     tokio::fs::rename(&tmp_path, path)
         .await
         .map_err(|err| format!("failed to move settings into place: {err}"))
@@ -213,12 +207,6 @@ pub async fn save_profile(profile: &ServerProfile) -> Result<(), String> {
         .await
         .map_err(|err| format!("failed to write temp profile: {err}"))?;
 
-    if tokio::fs::metadata(&path).await.is_ok() {
-        tokio::fs::remove_file(&path)
-            .await
-            .map_err(|err| format!("failed to remove old profile: {err}"))?;
-    }
-
     tokio::fs::rename(&tmp_path, &path)
         .await
         .map_err(|err| format!("failed to move profile into place: {err}"))
@@ -265,11 +253,6 @@ pub async fn save_mods(mods: &[ModEntry]) -> Result<(), String> {
     tokio::fs::write(&tmp_path, data)
         .await
         .map_err(|err| format!("failed to write temp mods: {err}"))?;
-    if tokio::fs::metadata(&path).await.is_ok() {
-        tokio::fs::remove_file(&path)
-            .await
-            .map_err(|err| format!("failed to remove old mods: {err}"))?;
-    }
     tokio::fs::rename(&tmp_path, &path)
         .await
         .map_err(|err| format!("failed to move mods into place: {err}"))
@@ -298,11 +281,6 @@ pub async fn save_packages(packages: &[ModPackage]) -> Result<(), String> {
     tokio::fs::write(&tmp_path, data)
         .await
         .map_err(|err| format!("failed to write temp packages: {err}"))?;
-    if tokio::fs::metadata(&path).await.is_ok() {
-        tokio::fs::remove_file(&path)
-            .await
-            .map_err(|err| format!("failed to remove old packages: {err}"))?;
-    }
     tokio::fs::rename(&tmp_path, &path)
         .await
         .map_err(|err| format!("failed to move packages into place: {err}"))
