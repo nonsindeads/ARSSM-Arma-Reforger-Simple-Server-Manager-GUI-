@@ -1,153 +1,149 @@
 # ARSSM – Arma Reforger Simple Server Manager
 
-ARSSM (Arma Reforger Simple Server Manager) is a local-first management tool for Arma Reforger dedicated servers.
-It allows you to create and manage server profiles by simply providing a workshop link and selecting a scenario.
-ARSSM automatically resolves all required mod dependencies, generates valid `server.json` configurations, and keeps them in sync over time.
+A local-first web-based manager for Arma Reforger dedicated servers.
+Provide a workshop URL, pick a scenario — ARSSM resolves all mod dependencies, generates a valid `server.json`, and keeps it in sync.
 
-The application focuses on clarity, determinism, and automation:
-- No cloud services
-- No remote dependencies at runtime
-- No heavyweight UI frameworks
+**Stack:** Rust (Axum + Tokio) · HTMX · Bootstrap 5 · Server-Sent Events for live log streaming
 
-ARSSM is built with a Rust backend and a minimal local web interface, designed to run on Windows hosts while remaining portable to Linux environments.
+---
 
-## Quick start
+## Web UI
 
-### Windows
-- Run the backend.
-- Open `https://<host>:3000` and use credentials from `%APPDATA%\arssm\credentials.json`.
+ARSSM exposes a full browser-based management interface at `https://<host>:3000`.
 
-### Linux (Ubuntu 22.04)
-- `bash scripts/setup-linux.sh`
-- Open `https://<host>:3000` and use credentials from `~/.config/arssm/credentials.json`.
+| Section | What you can do |
+|---|---|
+| **Dashboard** | Server status, quick start/stop, system metrics (CPU/RAM) |
+| **Profiles** | Create and manage server profiles per workshop mod |
+| **Workshop** | Resolve mod dependencies and select scenarios from a URL |
+| **Packages** | Group mods into reusable optional presets |
+| **Run & Logs** | Start/stop the server, watch live output via SSE stream |
+| **Settings** | Configure paths (SteamCMD, server exe, work dir) and global server.json defaults |
 
-## Key features
+Authentication: HTTP Basic Auth. Credentials are auto-generated on first start.
 
-- Create server profiles from Arma Reforger workshop URLs
-- Automatic recursive mod dependency resolution
-- Scenario discovery and selection
-- Deterministic `server.json` generation
-- Profile-based configuration storage
-- Optional mod presets
-- Dependency change detection on server start
-- Local web UI (no Electron, no SPA)
+---
 
-## Project goals
-
-- Reduce manual work when setting up Arma Reforger servers
-- Prevent broken servers caused by missing or changed mod dependencies
-- Keep server configuration transparent and reproducible
-- Stay lightweight, inspectable, and easy to automate
-
-## Non-goals
-
-- Game server hosting service
-- Cloud-based management platform
-- Monolithic GUI application
-
-## Setup
-
-### Windows
-- Build and run the backend (`backend`).
-- On first start, ARSSM generates a self-signed HTTPS certificate and random credentials.
-- Credentials are stored at `%APPDATA%\arssm\credentials.json`.
-- Open `https://<host>:3000` and use HTTP Basic authentication.
+## Quick Start
 
 ### Linux (Ubuntu 22.04)
-- Run the setup script once:
-  - `bash scripts/setup-linux.sh`
-- This installs dependencies, SteamCMD, the dedicated server, and writes defaults.
-- Credentials are stored at `~/.config/arssm/credentials.json`.
-- Open `https://<host>:3000` and use HTTP Basic authentication.
+
+```bash
+# 1. Run setup once — installs deps, SteamCMD, Arma Reforger server, writes defaults
+bash scripts/setup-linux.sh
+
+# 2. Build and start ARSSM
+cd backend && cargo build --release
+./target/release/backend
+
+# 3. Open the UI
+# https://<host>:3000
+# Credentials: ~/.config/arssm/credentials.json
+```
+
+### Windows
+
+```
+1. Build the backend: cd backend && cargo build --release
+2. Run: target\release\backend.exe
+3. Open: https://localhost:3000
+4. Credentials: %APPDATA%\arssm\credentials.json
+```
+
+> **Note:** ARSSM uses a self-signed TLS certificate. Your browser will show a security warning — this is expected for a local-network tool.
 
 ### Reset credentials
-- Linux: `bash scripts/reset-credentials.sh`
-- Windows: delete `%APPDATA%\arssm\credentials.json` and restart the server.
 
-### Notes
-- HTTPS uses a self-signed certificate. Your browser will show a warning.
-- ARSSM binds to `0.0.0.0:3000` so you can access it via LAN IP.
-- If your source is on a filesystem that blocks executables (e.g., CIFS), set `CARGO_TARGET_DIR` to a local path before building.
+```bash
+# Linux
+bash scripts/reset-credentials.sh
 
-## Config storage
+# Windows
+# Delete %APPDATA%\arssm\credentials.json and restart
+```
 
-The backend stores configuration in a single JSON file.
+---
 
-- Default path: `config/app_config.json` relative to the repository root.
-- Override with `ARSSM_CONFIG_PATH` to point somewhere else.
+## How It Works
 
-The web UI directory can be overridden with `ARSSM_WEB_DIR`.
+1. **Create a profile** — paste a workshop mod URL (e.g. from reforger.armaplatform.com)
+2. **Resolve** — ARSSM fetches the mod page, recursively resolves all dependency mod IDs, and lists available scenarios
+3. **Select a scenario** — pick the mission you want to run
+4. **Generate config** — ARSSM writes a complete `server.json` under your server work directory
+5. **Start** — click Start in the Run tab; live logs stream directly to your browser
 
-## Settings storage
+Config is regenerated fresh on every server start so profile changes always take effect.
 
-Settings are stored under the per-user app data directory:
-- Windows: `%APPDATA%\arssm\settings.json`
-- Fallback: `~/.config/arssm/settings.json`
+---
 
-## Workshop resolver
+## Data Storage
 
-`POST /api/workshop/resolve` resolves a workshop URL into the root ID, available scenarios,
-and recursive dependency IDs.
+All application data is stored locally. No cloud, no telemetry.
 
-Request:
+| Platform | Path |
+|---|---|
+| Linux | `~/.config/arssm/` |
+| Windows | `%APPDATA%\arssm\` |
+
+```
+~/.config/arssm/
+├── settings.json          # Paths and global server.json defaults
+├── profiles/              # One JSON file per server profile
+├── mods.json              # Custom mod registry
+├── packages.json          # Mod package presets
+├── credentials.json       # HTTP Basic Auth credentials
+├── certs/                 # Auto-generated self-signed TLS cert
+└── logs/                  # Per-profile server logs (timestamped)
+```
+
+Generated server configs are written to `configs/<profile_id>/server.json` inside your Reforger server work directory.
+
+---
+
+## API
+
+The backend exposes a small JSON API alongside the web UI:
+
+```
+POST /api/workshop/resolve    Resolve a workshop URL → root ID, scenarios, dependency IDs
+GET  /api/run/status          Current run state (running, pid, profile, uptime)
+POST /api/run/start           Start the server (optionally specify a profile_id)
+POST /api/run/stop            Stop the server
+GET  /api/run/logs/tail       Last N log lines (?n=200)
+GET  /api/run/logs/stream     SSE stream of live log output
+GET  /health                  Health check
+```
+
+**Workshop resolve example:**
 ```json
+POST /api/workshop/resolve
 {
   "url": "https://reforger.armaplatform.com/workshop/595F2BF2F44836FB-RHS-StatusQuo",
   "max_depth": 5
 }
 ```
 
-`GET /health` returns plain `ok` for non-browser clients and provides a small HTML test UI
-when accessed via a browser (Accept: `text/html`).
+---
 
-## Profiles
+## Building
 
-Profiles are stored as JSON files under the app data `profiles/` directory.
+Requires Rust 1.80+.
 
-## Config generation
+```bash
+cd backend
+cargo build --release
+```
 
-Baseline config: `backend/assets/server.sample.json`.
-Generated configs are written to `configs/<profile_id>/server.json` under the Reforger server work directory.
+The binary embeds all templates and the baseline `server.sample.json` — no additional files needed at runtime.
 
-## Run & Logs
-
-The backend exposes basic run endpoints and an SSE log stream:
-- `POST /api/run/start`
-- `POST /api/run/stop`
-- `GET /api/run/status`
-- `GET /api/run/logs/stream`
-
-## SteamCMD update (placeholder)
-
-`POST /api/steamcmd/update` returns a placeholder response for now.
-
-## Theme tokens
-
-Badge-aligned palette lives in `web/css/theme.css`. Use the `--arssm-*` tokens for all new UI:
-- `--arssm-bg`, `--arssm-surface`, `--arssm-border`
-- `--arssm-text`, `--arssm-muted`
-- `--arssm-accent` (primary actions, focus, warnings only)
+---
 
 ## License
 
-MIT License
+MIT License — Copyright (c) 2026 Simon Glashauser
 
-Copyright (c) 2025 ARSSM
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
